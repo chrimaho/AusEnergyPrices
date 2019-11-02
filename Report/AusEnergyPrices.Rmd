@@ -2098,7 +2098,7 @@ for (Feature in Features) {
 
 <!-- Cover Image -->
 
-```{r AEMO: Cover Image, echo=FALSE, eval=TRUE, results="hide", warning=FALSE, message=FALSE, fig.width=5, fig.height=5}
+```{r AEMO: Cover Image, echo=FALSE, eval=TRUE, results="hide", warning=FALSE, message=FALSE, fig.width=8, fig.height=3.6}
 element_textbox <- function(...) {
   el <- element_text(...)
   class(el) <- c("element_textbox", class(el))
@@ -2156,9 +2156,9 @@ aemo_MonthlyTS_avg_price[,"NSW"] %>%
                 ) +
             geom_label(
                 data=data.frame(
-                    label = c("Historic Price\n(NSW)","Future Price\n(NSW)")
+                    label = c("Historic NSW Price","Future NSW Price")
                     ,x=c(2013,2017.9)
-                    ,y=c(60,64)
+                    ,y=c(60,66)
                     )
                 ,mapping=aes(x=x, y=y, label=label, color=label)
                 ,nudge_x=0.4
@@ -3088,7 +3088,7 @@ aemo_MonthlyTS_avg_price %>%
     })
 ```
 
-*`r figure(name="LongTermForecastPlotByState", caption="Score of the Forecast for each State")`*
+*`r figure(name="LongTermForecastPlotByState", caption="Long Term Forecast for each State")`*
 
 
 <!-- !NOTE! This next bit is the analysis done for the BOM data. -->
@@ -3762,7 +3762,7 @@ Zeileis, A, nd. 'is.regular',  *R Documentation*, viewed 28/Oct/2019, <<https://
 
 # Post Script {#postscript}
 
-This report was compiled with some assistance from others. Acknowledgements go to:
+**Acknowledgements**: This report was compiled with some assistance from others. Acknowledgements go to:
 
 1. Yan Holtz for his code for how to add the footer elements (<https://holtzy.github.io/Pimp-my-rmd/> & <https://github.com/holtzy/epuRate>).
 1. Tim Holman for his code for how to add the GitHub corner (<https://github.com/tholman/github-corners>).
@@ -3770,9 +3770,9 @@ This report was compiled with some assistance from others. Acknowledgements go t
 1. Michael Gordon for his assistance to write the scripts to web-scrape the BOM website.
 
 
-This report is also published on the following sites:
+**Publications**: This report is also published on the following sites:
 
-1. Medium: [Medium](www.medium.com)
-1. RPubs: [RPubs](www.rpubs.com)
-1. GitHub: [GitHub](www.github.com)
-1. LinkedIn: [LinkedIn](www.linkedin.com)
+1. RPubs: [RPubs/chrimaho/AusEnergyPrices](http://rpubs.com/chrimaho/AusEnergyPrices)
+1. GitHub: [GitHub/chrimaho/AusEnergyPrices](https://github.com/chrimaho/AusEnergyPrices)
+1. Medium: [Medium/chrimaho/AusEnergyPrices](https://medium.com/@chrimaho/ausenergyprices-737b9cbe5540?sk=8d0dd0bc3167c2ce59d9b389d5c443af)
+1. LinkedIn: [LinkedIn/chrimaho/AusEnergyPrices](https://www.linkedin.com/pulse/future-australian-energy-prices-chris-mahoney)
