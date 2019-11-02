@@ -2,7 +2,8 @@
 title: 'The Future of Australian Energy Prices'
 subtitle: 'Time-Series Analysis of Historic Prices and Forecast for Future Prices'
 author: 'Author: [Chris Mahoney](https://www.linkedin.com/in/chrimaho/)'
-date: 'Date: `r format(Sys.time(), "%d/%b/%Y")`'
+date: 'Published: 02/Nov/2019'
+#date: 'Date: `r format(Sys.Date(), "%d/%b/%Y")`'
 toc-title: Contents
 output:
   html_document:
@@ -3776,3 +3777,7 @@ Zeileis, A, nd. 'is.regular',  *R Documentation*, viewed 28/Oct/2019, <<https://
 1. GitHub: [GitHub/chrimaho/AusEnergyPrices](https://github.com/chrimaho/AusEnergyPrices)
 1. Medium: [Medium/chrimaho/AusEnergyPrices](https://medium.com/@chrimaho/ausenergyprices-737b9cbe5540?sk=8d0dd0bc3167c2ce59d9b389d5c443af)
 1. LinkedIn: [LinkedIn/chrimaho/AusEnergyPrices](https://www.linkedin.com/pulse/future-australian-energy-prices-chris-mahoney)
+
+**Change Log**: This publication was modified on the following dates:
+
+1. 02/Nov/2019: Original Publication date.
