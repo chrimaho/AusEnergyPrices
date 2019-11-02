@@ -1,0 +1,3778 @@
+---
+title: 'The Future of Australian Energy Prices'
+subtitle: 'Time-Series Analysis of Historic Prices and Forecast for Future Prices'
+author: 'Author: [Chris Mahoney](https://www.linkedin.com/in/chrimaho/)'
+date: 'Date: `r format(Sys.time(), "%d/%b/%Y")`'
+toc-title: Contents
+output:
+  html_document:
+    code_download: yes
+    highlight: haddock
+    number_sections: yes
+    template: default_toc.html
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+    includes:
+      in_header: header.html
+      after_body: footer.html
+  html_notebook:
+    highlight: haddock
+    number_sections: yes
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: no
+    includes:
+      in_header: header.html
+      after_body: footer.html
+---
+
+<style>
+.math {
+    font-size: 120%;
+    font-style: normal;
+    font-family: "Cambria Math";
+}
+.column {
+    float: left;
+    width: 50%;
+    border: 1px solid black;
+}
+.row:after {
+    content: "";
+    display: table;
+    clear: both;
+}
+h1, .h1 {
+    margin-top: 40px;
+    font-weight: bold;
+}
+h2, .h2 {
+    margin-top: 40px;
+    margin-left: 40px;
+}
+</style>
+
+
+<!-- Acknowledgements: -->
+<!-- 1. To Yan Holtz for his code for how to add the footer elements (https://holtzy.github.io/Pimp-my-rmd/ & https://github.com/holtzy/epuRate). -->
+<!-- 2. To Tim Holman for his code for how to add the GitHub corner (https://github.com/tholman/github-corners). -->
+<!-- 3. To William Dai for his assistance to write the scripts to web-scrape the AEMO website. -->
+<!-- 3. To Michael Gordon for his assistance to write the scripts to web-scrape the BOM website. -->
+
+
+<!-- Set Up Environment -->
+
+```{r LOAD Packages, echo=FALSE, eval=TRUE, results="hide", warning=FALSE, message=FALSE}
+# Remove all packages. Note: The suppression functions are to limit the amount of printed output.
+for (package in .packages()) {
+    if (!package %in% c("parallel", "stats", "graphics", "grDevices", "datasets", "utils", "methods", "base")) { #THESE PACKAGES ARE PART OF BASE!! YOU CANNOT REMOVE THEM!! But you can remove everything else...
+        suppressPackageStartupMessages ( 
+            suppressMessages ( 
+                suppressWarnings ( 
+                    detach ( paste0("package:", package) #detach() is like the reverse of library() or require().
+                           , unload = TRUE
+                           , character.only = TRUE
+                           )
+                )
+            )
+        )
+    }
+}
+
+# Define packages required. These are some of the awesome packages that I have used in the past.
+required_packages <- c ( "MASS"      , "readabs"      , "foreach"    , "data.table"
+                       , "tidyverse" , "lubridate"    , "ggrepel"    , "urca"
+                       , "readr"     , "knitr"        , "kableExtra" , "rmarkdown"  
+                       , "stringi"   , "RColorBrewer" , "magrittr"   , "tidyr"
+                       , "forecast"  , "grid"         , "outliers"   , "httr"
+                       , "jsonlite"  , "leaflet"      , "gridExtra"  , "scales"         
+                       , "captioner" , "tictoc"       , "ggpubr"     , "seastests"
+                       , "zoo"       , "dtplyr"       , "tsfeatures" , "bookdown"
+                       )
+
+# Install all defined packages
+for (package in required_packages) {
+    if (!package %in% installed.packages()) { #installed.packages() returns a vector of all the installed packages...
+        install.packages ( package
+                         # , quiet = TRUE
+                         # , verbose = FALSE
+                         , dependencies = TRUE
+                         )
+    }
+}
+
+# Load all defined packages
+for (package in required_packages) { #Need to loop through a second time because it does funny things if you combine the install.packages() and library() steps in to one.
+    if (!package %in% .packages()) { #.packages() returns a vector of all the loaded packages...
+        suppressPackageStartupMessages (
+            library ( package
+                    , character.only = TRUE
+                    , quietly = TRUE
+                    , warn.conflicts = FALSE
+                    , verbose = FALSE
+                    )
+        )
+    }
+}
+
+# Clean up
+rm(required_packages, package)
+```
+
+```{r SET Defaults, echo=FALSE, eval=TRUE}
+# Set Default themes
+theme_set(theme_bw())
+theme_update( plot.title = element_text(hjust=0.5)
+            , plot.subtitle = element_text(hjust=0.5)
+            )
+
+# Set Default table and figure sizes
+knitr::opts_chunk$set(rows.print=200, cols.print=30, fig.width=10, fig.height=7)
+
+# Set Default rounding length
+options(digits = 4)
+options(scipen = 999)
+
+# Set the Table and Figure caption
+table <- captioner(prefix="Table")
+figure <- captioner(prefix="Figure")
+```
+
+```{r SET Function, echo=FALSE, eval=TRUE}
+#### Three string manipulation functions (LEFT,RIGHT,MID) ####
+str_left <- function(string, num_chars) {
+    
+    # Input:
+    # - 'string' is the text string you want to select from; must be an character type.
+    # - 'num_chars' is the number of characters that you want to select; must be an atomic numeric type.
+    
+    # Output:
+    # - A text string of length 'num_chars' that corresponds to the left most number of characters from the 'string' option.
+    
+    # Validations:
+    stopifnot(is.character(string))
+    stopifnot(is.numeric(num_chars))
+    stopifnot(is.atomic(num_chars))
+    
+    # Do work
+    return <- substr(string, 1, num_chars)
+    
+    # Return
+    return(return)
+    
+}
+
+str_mid <- function(string, start_num, num_chars) {
+    
+    # Input:
+    # - 'string' is the text string you want to select from; must be an atopic string.
+    # - 'start_num' is the starting position of the mid-text string you want to select from; must be an atomic numeric type.
+    # - 'num_chars' is the number of characters that you want to select; must be an atomic numeric type.
+    
+    # Output:
+    # - A text string of length 'num_chars' that corresponds to the characters from the 'start_num' starting position from the 'string' option.
+    
+    # Validations:
+    stopifnot(is.character(string))
+    stopifnot(is.numeric(start_num))
+    stopifnot(is.atomic(start_num))
+    stopifnot(is.numeric(num_chars))
+    stopifnot(is.atomic(num_chars))
+    
+    # Do work
+    return <- substr(string, start_num, start_num + num_chars - 1)
+    
+    # Return
+    return(return)
+    
+}
+
+str_right <- function(string, num_chars) {
+    
+    # Input:
+    # - 'string' is the text string you want to select from; must be an character type.
+    # - 'num_chars' is the number of characters that you want to select; must be an atomic numeric type.
+    
+    # Output:
+    # - A text string of length 'num_chars' that corresponds to the right most number of characters from the 'string' option.
+    
+    # Validations:
+    stopifnot(is.character(string))
+    stopifnot(is.numeric(num_chars))
+    stopifnot(is.atomic(num_chars))
+    
+    # Do work
+    return <- substr(string, nchar(string) - (num_chars - 1), nchar(string))
+    
+    # Return
+    return(return)
+    
+}
+
+#### Function written by Michelle ####
+header.true <- function(df) {
+    names(df) <- as.character(unlist(df[1,]))
+    df[-1,]
+}
+
+#### Function for finding the dimensions of a number of DataFrames ####
+DataFrameDimensions <- function (DataFrames) {
+  
+    # Input:
+    # - 'DataFrames' must be a character vector of each data.frame that you want to review the dimensions of.
+    
+    # Validations:
+    stopifnot(is.character(DataFrames))
+    
+    for(DataFrame in DataFrames) {
+    
+        if (!exists(DataFrame)) {
+            warning (paste0("\n", "'", DataFrame, "'", " is not a valid data frame", "\n"))
+            next
+        }
+        
+        # Get the DataFrame
+        GetDataFrame <- get(DataFrame)
+        
+        # Initialise the DimsTable
+        if (!exists("DimsTable")) {DimsTable <- NULL}
+        
+        # Compile the DimsTable
+        DimsTable <- rbind(DimsTable, data.frame(
+            DataFrame = DataFrame,
+            NumRows = dim(GetDataFrame)[1],
+            NumCols = dim(GetDataFrame)[2]
+            ))
+    
+    }
+  
+  # Return the DimsTable
+  return (DimsTable)
+  
+}
+
+#### IsEmpty ####
+IsEmpty <- function (x) {
+    if (is.function(x) || typeof(x) == "S4") {
+        return (FALSE)
+    } else {
+        return (is.null(x) || length(x) == 0 || all(is.na(x)))
+    }
+}
+
+#### Review DataFrame Statistics ####
+ReviewDfStats <- function (DataFrame) {
+  
+    # Input:
+    # - 'DataFrame' is a dataframe.
+    
+    # Validations:
+    stopifnot(!IsEmpty(DataFrame))
+    stopifnot(is.data.frame(DataFrame))
+    
+    # Load necessary packages
+    if (!"pastecs" %in% installed.packages()) { 
+        install.packages ( "pastecs"
+                         , quiet = TRUE
+                         , verbose = FALSE
+                         , dependencies = TRUE
+                         )
+    }
+    if (!"pastecs" %in% .packages()) { #.packages() returns a vector of all the loaded packages...
+        suppressPackageStartupMessages (
+            suppressWarnings (
+                suppressMessages (
+                    library ( "pastecs"
+                            , character.only = TRUE
+                            , quietly = TRUE
+                            , warn.conflicts = FALSE
+                            , verbose = FALSE
+                            )
+                )
+            )
+        )
+    }
+  
+    # Set up the FinalDataFrame
+    DataFrame %>% 
+        summary.default() %>% 
+        data.frame() %>% 
+        spread(key=Var2, value=Freq) %>% 
+        rename("variable"="Var1") %>% 
+        mutate_if(is.factor,as.character()) %>% 
+        mutate(Mode=replace(Mode, Class=="factor", "character"),
+            Mode=replace(Mode, Class=="ordered", "character")) ->
+        FinalDataFrame
+  
+    # Declare NumCols
+    DataFrame %>% 
+        select_if(is.numeric) %>% 
+        names() ->
+        numcols
+    
+    # Determine if NormTest is needed
+    if (nrow(DataFrame) > 5000) {
+        DoNorm <- FALSE
+    } else {
+        DoNorm <- TRUE
+    }
+  
+    # Describe with pastecs
+    DataFrame %>%
+        select(numcols) %>%
+        stat.desc(basic=T, desc=T, norm=DoNorm, p=0.95) %>%
+        round(digits=2) %>%
+        rownames_to_column() %>%
+        mutate(rowname=factor(rowname,levels=c( "mean"
+                                              , "std.dev"
+                                              , "median"
+                                              , "max"
+                                              , "min"
+                                              , "range"
+                                              , "sum"
+                                              , "var"
+                                              , "skewness"
+                                              , "kurtosis"
+                                              , "normtest.W"
+                                              , "normtest.p"
+                                              , "SE.mean"
+                                              , "CI.mean.0.95"
+                                              , "coef.var"
+                                              , "skew.2SE"
+                                              , "kurt.2SE"
+                                              , "nbr.val"
+                                              , "nbr.null"
+                                              , "nbr.na"
+                                              )
+          )) %>%
+        arrange(rowname) %>%
+        t() %>%
+        as.data.frame() %>%
+        rownames_to_column() ->
+        stat_table
+
+    # Fix col names
+    names(stat_table) <- as.matrix(stat_table[1,])
+
+    # Select only the columns needed
+    stat_table <- stat_table[-1, !names(stat_table) %in% c("var", "kurtosis", "normtest.p", "SE.mean", "CI.mean.0.95", "coef.var", "skew.2SE", "kurt.2SE")]
+    
+    # Make pretty
+    stat_table <- stat_table %>%
+        mutate( nbr.val=gsub(".00","",nbr.val,fixed=T)
+              , nbr.null=gsub(".00","",nbr.null,fixed=T)
+              , nbr.na=gsub(".00","",nbr.na,fixed=T)
+              , min=gsub(".00","",min,fixed=T)
+              , nbr.val=gsub(".0","",nbr.val,fixed=T)
+              , nbr.null=gsub(".0","",nbr.null,fixed=T)
+              , nbr.na=gsub(".0","",nbr.na,fixed=T)
+              , min=gsub(".0","",min,fixed=T)
+              ) %>%
+        rename( variable=rowname
+              , "num_val"=nbr.val
+              , "num_null"=nbr.null
+              , "num_na"=nbr.na
+              ) %>%
+        mutate( mean=as.numeric(as.character(mean))
+              , std.dev=as.numeric(as.character(std.dev))
+              , median=as.numeric(as.character(median))
+              , max=as.numeric(as.character(max))
+              , min=as.numeric(as.character(min))
+              , range=as.numeric(as.character(range))
+              , "num_val"=as.numeric(as.character("num_val"))
+              , "num_null"=as.numeric(as.character("num_null"))
+              , "num_na"=as.numeric(as.character("num_na"))
+              )
+
+    # Fix Norm parts
+    if (DoNorm==TRUE) {
+        stat_table <- stat_table %>%
+        rename(skew=skewness,
+            normtest=normtest.W) %>%
+        mutate(skew=as.numeric(as.character(skew)),
+            normtest=as.numeric(as.character(normtest)))
+    }
+  
+    # Join back on FinalDataFrame
+    FinalDataFrame %>% 
+        left_join(stat_table, by="variable") ->
+        FinalDataFrame
+  
+    # Find number of distinct values
+    DataFrame %>%
+        summarise_all(funs(n_distinct(.))) %>%
+        t() %>%
+        data.frame(num_distinct=.) %>%
+        rownames_to_column(var="variable") ->
+        distincts
+  
+    # Find number of NA's
+    DataFrame %>% 
+        summarise_all(funs(sum(is.na(.)))) %>% 
+        t() %>% 
+        data.frame(num_na=.) %>% 
+        rownames_to_column(var="variable") ->
+        nas
+  
+    # Find number of NA's
+    DataFrame %>% 
+        summarise_all(funs(sum(is.null(.)))) %>% 
+        t() %>% 
+        data.frame(num_null=.) %>% 
+        rownames_to_column(var="variable") ->
+        nulls
+
+    # Apply back to the FinalDataFrame
+    FinalDataFrame %>% 
+        select(-num_na, -num_null, -num_val) %>% 
+        left_join(distincts, by="variable") %>% 
+        left_join(nas, by="variable") %>% 
+        left_join(nulls, by="variable") ->
+        FinalDataFrame
+  
+    # Return
+    return (FinalDataFrame)
+
+}
+
+#### Review Distributions of each Variable in DataFrame ####
+ReviewDfDistributions <- function (DataFrame, ExcludeColumns=NA, TargetColumn=NA) {
+  
+    # Input:
+    # - DataFrame must be a data.frame.
+    # - ExludeDolumns is optional. If applied, these columns will not be viewed.
+    # - TargetColumn is optional. If applied, will produce dot plots.
+    
+    # Stop if DataFrame not a data.frame
+    if (!c("data.frame") %in% class(DataFrame)) {
+        stop ("Please parse a data.frame as the first element of the ReviewDfDistributions function.")
+    }
+  
+    # Loop through all the variables in the DataFrame
+    for (variable in names(DataFrame)) {
+    
+        # Check if variable in ExcludeColumns. If yes, then skip to next variable.
+        if (variable %in% ExcludeColumns) {next}
+        
+        # Produce data.frame of each variable and it's type.
+        if (!exists("ReturnFrame")) {ReturnFrame <- NULL}
+        ReturnFrame <- rbind(ReturnFrame, data.frame( variable=variable
+                                                    , class=unlist(lapply(DataFrame[,variable],class))
+                                                    , mode=unlist(lapply(DataFrame[,variable],mode))
+                                                    , typeof=unlist(lapply(DataFrame[,variable],typeof))
+                                                    ))
+        
+        # Product Plots for the numeric variables.
+        if (unlist(lapply(DataFrame[,variable],mode))=="numeric" & (!unlist(lapply(DataFrame[,variable],class)) %in% c("factor","ordered","POSIXct"))) {
+          
+            # Remove the NA's in the variable.
+            dat <- DataFrame %>% drop_na(variable)
+          
+            # Set Statistics
+            max <- dat %>% select(variable) %>% pull() %>% max()
+            min <- dat %>% select(variable) %>% pull() %>% min()
+            avg <- dat %>% select(variable) %>% pull() %>% mean()
+            std <- dat %>% select(variable) %>% pull() %>% sd()
+            len <- dat %>% select(variable) %>% pull() %>% length()
+            bins <- 30
+            bw <- (max - min) / (bins + 1)
+          
+            # Set Histogram Plot
+            hist <- dat %>% 
+                ggplot(aes_string(variable)) +
+                geom_histogram(aes(y=..count..), fill="cornflowerblue", color="black", alpha=0.7, binwidth = bw) +
+                stat_function(fun=function(x) dnorm(x, mean=avg, sd=std) * len * bw, color="orangered", size=1.5) +
+                labs( title=paste0("Histogram Plot")
+                    , subtitle=paste0("'", variable, "'", "\n", "avg='", round(avg,3), "' std='", round(std,3), "'")
+                    )
+          
+            # Set the QQ Plot
+            qq <- dat %>% 
+                ggplot(aes_string(sample=variable)) +
+                geom_qq(color="cornflowerblue", alpha=0.7) +
+                geom_qq_line(color="orangered", size=1.5) +
+                labs( title=paste0("QQ Plot")
+                    , subtitle=paste0("'", variable, "'")
+                    )
+          
+            # If TargetColumn is not missing then produce Dot Plot
+            if (!missing(TargetColumn)) {
+                dot <- dat %>% 
+                    mutate_each(funs(factor), TargetColumn) %>% 
+                    ggplot(aes_string(x=variable, y=TargetColumn, fill=TargetColumn)) +
+                    geom_density_ridges(alpha=0.6, bandwidth=1, scale=1.5) +
+                    labs( title=paste0("Ridge Plot")
+                        , subtitle=paste0("'", variable, "'", "\n", "vs", "\n", "'", TargetColumn, "'")
+                        )
+            }
+          
+            # Print the Plots all side by side.
+            if (missing(TargetColumn)) {
+                grid.arrange(hist, qq, ncol=2)
+            } else {
+                grid.arrange(hist, qq, dot, ncol=3)
+            }
+          
+        }
+        
+        # Produce Plots for the Logical variables
+        if (unlist(lapply(DataFrame[,variable],mode))=="logical") {
+          
+            # Remove NA's in the variable
+            dat <- DataFrame %>% drop_na(variable)
+          
+            # Set Bar Plot
+            bar <- dat %>% 
+                ggplot(aes_string(variable, fill=variable)) +
+                geom_bar(aes(y=..count..), alpha=0.7) +
+                geom_text(aes(label=..count..), stat="count", position=position_stack(0.5)) +
+                labs( title=paste0("Bar Plot")
+                    , subtitle=paste0("'", variable, "'")
+                    )
+          
+            # If TargetColumn is not missing, then produce Grouped Bar Plot
+            if (!missing(TargetColumn)) {
+                grpbar <- dat %>% 
+                    ggplot(aes_string(TargetColumn, fill=variable)) +
+                    geom_bar(aes(y=..count..), alpha=0.7, position="stack") +
+                    geom_text(aes(label=..count..), stat="count", position=position_stack(0.5)) +
+                    labs( title=paste0("Grouped Bar Plot")
+                        , subtitle=paste0("'", variable, "'", "\n", "by", "\n", "'", TargetColumn)
+                        )
+            }
+          
+            # Print the Plots all side by side
+            if (missing(TargetColumn)) {
+                grid.arrange(bar, ncol=1)
+            } else {
+                grid.arrange(bar, grpbar, ncol=2)
+            }
+          
+        }
+        
+        # Produce Plots for the Categorical Character variables
+        if (unlist(lapply(DataFrame[,variable], mode))=="numeric" & (unlist(lapply(DataFrame[,variable],class)) %in% c("factor","ordered"))) {
+          
+            # Remove NA's from the variable
+            dat <- DataFrame %>% drop_na(variable)
+          
+            # Set Bar Plot
+            bar <- dat %>% 
+                ggplot(aes_string(variable, fill=variable)) +
+                geom_bar(aes(y=..count..), alpha=0.7) +
+                labs( title=paste0("Bar Plot")
+                    , subtitle=paste0("'", variable, "'")
+                    )
+          
+            # If TargetColumn is not missing, then produce Grouped Bar Plot
+            if (!missing(TargetColumn)) {
+                grpbar <- dat %>% 
+                    ggplot(aes_string(TargetColumn, fill=variable)) +
+                    geom_bar(aes(y=..count..), alpha=0.7, position="stack") +
+                labs( title=paste0("Grouped Bar Plot")
+                    , subtitle=paste0("'", variable, "'", "\n", "by", "\n", "'", TargetColumn, "'")
+                    )
+          }
+          
+          # Print the Plots all side by side
+          if (missing(TargetColumn)) {
+                grid.arrange(bar, ncol=1)
+          } else {
+                grid.arrange(bar,grpbar, ncol=2)
+          }
+          
+        }
+    
+    }
+  
+  return (ReturnFrame)
+  
+}
+```
+
+
+<!-- Get Data -->
+
+```{r GET AEMO Energy Data, echo=FALSE, eval=FALSE, results="hide"}
+# Credit to William Dai for helping with the Code in this chunk.
+
+states <- c("QLD1","NSW1","VIC1","TAS1","SA1")
+data_dl_list <- c()
+
+#What does this do?
+#Fetches the actual csv file from AEMO
+get_data_from_aemo <- function(url,filename) {
+    data <- read.csv(text = getURL(url))
+    print(paste0("Wrote file to disk: ",filename))
+    return(data)
+}
+
+
+#Pretty sure there is a better way of doing this as opposed to a triple for loop, VERY VERY BAD!
+#What does this do?
+#Creates the data url, as I found out links are coded in the following format:
+#https://www.aemo.com.au/aemo/data/nem/priceanddemand/PRICE_AND_DEMAND_<YYYYMM>_STATE1.csv
+#i.e. https://www.aemo.com.au/aemo/data/nem/priceanddemand/PRICE_AND_DEMAND_201901_NSW1.csv
+
+build_dl_file_list <- function(start_yrs, end_yr) {
+    
+    for(state in 1:length(states)) {
+        start_yr <- start_yrs
+        
+        for(start_yr in start_yrs:end_yr) {
+            month_c <- 1
+            
+            for(month_c in 1:12) {
+                
+                if(month_c < 10) { month <- paste('0',month_c,sep="") }
+                else { month <- month_c }
+                
+                file_name <- paste('PRICE_AND_DEMAND_',start_yr,month,'_',states[state],".csv",sep="")
+                data_dl_list <- append(data_dl_list,file_name)
+            }
+        }
+    }
+    #DEBUG -- write.csv(data_dl_list, file = "data_dl_list.csv",row.names=FALSE,col.names=FALSE, sep=",")
+    return(data_dl_list)
+}
+
+#What does this do?
+#for loop to loop through all the files to be downloaded and gets the data from AEMO using RCurl.
+process_aemo_links <- function(aemo_data_list) {
+    tmp_master_data_list <- c()
+    for(lk in 1:length(aemo_data_list)) {
+        df <- get_data_from_aemo(paste0('https://www.aemo.com.au/aemo/data/nem/priceanddemand/',aemo_data_list[lk]),paste0('./data/',aemo_data_list[lk])) 
+        tryCatch({
+            tmp_master_data_list <- suppressWarnings(rbind(tmp_master_data_list,df))
+        }, error=function(e){
+            print(paste0("Error process file: ",aemo_data_list[lk]))
+        },finally={
+            next
+        })
+    }
+    return(tmp_master_data_list)
+}
+
+#What does this do?
+#Runs the program based off the inputs in main
+main <- function(begin_yr,end_yr,out_consolidated_loc) {
+    
+    master_data_list <- c()
+    
+    data_dl_list <- build_dl_file_list(begin_yr,end_yr)
+    
+    master_data_list <<- process_aemo_links(data_dl_list)
+    
+    saveRDS(master_data_list,"AEMO_Data_Extract_Consolidated.rds")
+    
+    #the below write.csv code is for DEBUG only
+    #write.csv(master_data_list, file = "AEMO_Data_Extract_Consolidated.csv",row.names=FALSE,col.names=FALSE, sep=",")
+    
+    print("Data processed successfully - terminating program")
+}
+
+#What does this do?
+#Arg 1: Year to commence scraping
+#Arg 2: Year to end scraping
+#Arg 3: Location to store scraped data.
+
+# Read data in to Memory
+if (file.exists(paste0(getwd(), "/data/AEMO/", "AEMO_Data_Extract_Consolidated.rds"))) {
+    if (!exists("aemo_Consolidated")) {
+        assign("aemo_Consolidated", readRDS(paste0(getwd(), "/data/AEMO/", "AEMO_Data_Extract_Consolidated.rds")))
+    }
+} else {
+    main(1998, 2019, "./data")
+    assign("aemo_Consolidated", master_data_list)
+    rm(master_data_list)
+}
+
+```
+
+```{r GET BOM Weather Data, echo=FALSE, eval=FALSE, results="hide"}
+# Credit to Michael Gordon for helping with the Code in this chunk.
+# WARNING: if you execute this code bom.gov.au site will block your ip address.
+
+if (FALSE) {
+    
+    # gets the path to the bom.db SQLite file
+    getBOMDBPath <- function(){
+      return(file.path(path.expand("~"), ".bom_cache", "bom.db"))
+    }
+    
+    # this function will create the .bom_cache directory in you home directory if it does
+    # not already exist
+    ensureBOMCachePath <- function(){
+      cache_path = file.path(path.expand("~"), ".bom_cache")
+      
+      if(!dir.exists(cache_path)){
+        dir.create(cache_path, recursive = TRUE)
+      }
+      
+      return(cache_path)
+    }
+    
+    # initilizes the remote selenium driver, currently dependent on selenium server
+    # running inside a docker container
+    getRemoteDriver <- function(){
+      # Run this to start the selenium server
+      # sudo docker run -d -p 4445:4444 selenium/standalone-chrome
+      remote_driver <- remoteDriver(
+        remoteServerAddr = "localhost",
+        port = 4445L,
+        browserName = "chrome"
+      )
+      return(remote_driver)
+    }
+    
+    # creates a connection to the SQLite cache database
+    getDBConnection <- function(){
+      ensureBOMCachePath()
+      connection <- dbConnect(RSQLite::SQLite(), getBOMDBPath())
+      return(connection)
+    }
+    
+    connection <- getDBConnection()
+    
+    getWeatherStationDetails <- function(remDr){
+      
+      # These are the pages which have the details of the weather stations for the various states
+      # unfortunatly not all the information for the weather stations are on these pages so this
+      # is a two step process, we get the initial information from these pages plus a link to a 
+      # page whihc has the rest of the information we want.
+      pages_to_crawl = c(
+        "http://reg.bom.gov.au/act/observations/canberra.shtml"
+        , "http://www.bom.gov.au/nsw/observations/nswall.shtml"
+        , "http://www.bom.gov.au/nt/observations/ntall.shtml"
+        , "http://www.bom.gov.au/qld/observations/qldall.shtml"
+        , "http://www.bom.gov.au/sa/observations/saall.shtml"
+        , "http://www.bom.gov.au/tas/observations/tasall.shtml"
+        , "http://www.bom.gov.au/vic/observations/vicall.shtml"
+        , "http://www.bom.gov.au/wa/observations/waall.shtml"
+      )
+      
+      names(pages_to_crawl) = c(
+        "ACT"
+        , "NSW"
+        , "NT"
+        , "QLD"
+        , "SA"
+        , "TAS"
+        , "VIC"
+        , "WA"
+      )
+      
+      idn_pattern = "([A-Z]{3}[0-9]{5}\\.[0-9]{5})"
+      
+      
+      state_col <- c()
+      idn_col <- c()
+      name_col <- c()
+      id_col <- c()
+      lat_col <- c()
+      lon_col <- c()
+      height_col <- c()
+      url_col <- c()
+      
+      
+      counter = 1
+      
+      # in this loop we get the initial information plus link to other page with more information
+      for(state_name in names(pages_to_crawl)){
+        
+        remDr$navigate(pages_to_crawl[state_name])
+        anchors <- remDr$findElements(using = 'css selector', "th.rowleftcolumn a")
+        
+        for(a in anchors){
+          
+          # get the url to the other page
+          url <- a$getElementAttribute('href')[[1]]
+          url_col[counter] <- url
+          
+          # get the IDN number of the station
+          idn <- str_extract(url, idn_pattern)
+          idn <- strsplit(idn, '\\.')[[1]][1]
+          
+          # get the name of the station
+          name <- a$getElementText()[[1]]
+          
+          # record those values in lists to be converted to dataframe later
+          state_col[counter] <- state_name
+          idn_col[counter] <- idn
+          name_col[counter] <- name
+          
+          counter <- counter + 1 
+        }
+        
+      }
+      
+      counter = 1
+      
+      # in this loop we navigat to the other url we obtained from the first page
+      for(url in url_col){
+        
+        remDr$navigate(url)
+        station_table = remDr$findElements(using = "css selector", ".stationdetails td")
+        
+        # get the station id
+        station_id <- station_table[[2]]$getElementText()
+        station_id <- str_remove(station_id, ".{4}")
+        id_col[counter] <- station_id
+        
+        # get the location latitude value
+        station_lat <- station_table[[4]]$getElementText()
+        station_lat <- str_remove(station_lat, ".{5}")
+        lat_col[counter] <- station_lat
+        
+        # get the location longitude value
+        station_lon <- station_table[[5]]$getElementText()
+        station_lon <- str_remove(station_lon, ".{5}")
+        lon_col[counter] <- station_lon
+        
+        # get the elevation of the station
+        station_height <- station_table[[6]]$getElementText()
+        station_height <- str_remove(station_height, ".{8}")
+        height_col[counter] <- station_height
+        
+        counter <- counter + 1 
+      }
+      
+      weather_stations <- data.frame(
+        idn = idn_col
+        , name = name_col
+        , state = state_col
+        , station_id = id_col
+        , lat = lat_col
+        , lon = lon_col
+        , elevation = height_col
+      )
+      
+      dbWriteTable(connection, "weather_stations", weather_stations, overwrite = TRUE)
+    }
+    
+    errors = list(station_id = list(), ncc = list(), error = list())
+    
+    getWeatherStationData <- function(data_url_template, ncc, station_id){
+      
+      url = sprintf(data_url_template, ncc, station_id)
+      
+      # need to place error handling here because some weather stations are missing this data
+      # this causes the process to crash because it cannot locate the zip_link_selector
+      df <- tryCatch({
+        
+        # this is a css attribute selector expression, it basically means find an anchor tag within an 
+        # unordered list with the class 'download' where  the href (i.e. url) contains 'dailyZippedDataFile'
+        zip_link_selector = "ul.downloads a[href*='dailyZippedDataFile']"
+        
+        driver$navigate(url)
+        
+        # obtaining the download link for the zip file containing the data we are interested in.
+        zip_link = driver$findElement("css selector", zip_link_selector)
+        download_url = zip_link$getElementAttribute('href')[[1]]
+        
+        # download the zip file to the .bom_cache directory.
+        zip_destination <- sprintf("%s/%s_%s.zip", ensureBOMCachePath(), station_id, ncc)
+        download.file(download_url, destfile = zip_destination, method = "wget")
+        
+        # unzip the downlaoded zip file into a new directory within the .bom_cache directory.
+        destination_directory <- sprintf("%s/%s_%s", ensureBOMCachePath(), station_id, ncc)
+        unzip(zip_destination, exdir = destination_directory)
+        
+        # find and load the .csv file within the new directory
+        file_list <- list.files(path = destination_directory)
+        data_file <- file_list[grepl('.*\\.csv', file_list)]
+        df <- read_csv(file.path(destination_directory, data_file))
+        
+        # clean up downloaded and extracted files we no longer require them.
+        for(file_name in file_list){
+          file.remove(file.path(destination_directory, file_name))
+        }
+        file.remove(destination_directory)
+        file.remove(zip_destination)
+        
+        # rename the columns in the dataframe depending on the ncc id
+        if(ncc == 122){
+          # Original column names:
+          # Product code,Bureau of Meteorology station number,Year,Month,Day,Maximum temperature (Degree C),Days of accumulation of maximum temperature,Quality
+          names(df) <- c(
+            "product_code"
+            , "station_id"
+            , "year"
+            , "month"
+            , "day"
+            , "max_temp"
+            , "days_of_accumulation"
+            , "quality"
+          )
+        } else if (ncc == 123){
+          # Original column names:
+          # Product code,Bureau of Meteorology station number,Year,Month,Day,Minimum temperature (Degree C),Days of accumulation of minimum temperature,Quality
+          names(df) <- c(
+            "product_code"
+            , "station_id"
+            , "year"
+            , "month"
+            , "day"
+            , "min_temp"
+            , "days_of_accumulation"
+            , "quality"
+          )
+        }else if(ncc == 136){
+          # Original column names:
+          # Product code,Bureau of Meteorology station number,Year,Month,Day,Rainfall amount (millimetres),Period over which rainfall was measured (days),Quality
+          names(df) <- c(
+            "product_code"
+            , "station_id"
+            , "year"
+            , "month"
+            , "day"
+            , "rainfall_millimetres"
+            , "days_of_accumulation"
+            , "quality"
+          )
+        }else if(ncc == 193){
+          # Original column names:
+          # Product code,Bureau of Meteorology station number,Year,Month,Day,Daily global solar exposure (MJ/m*m)
+          names(df) <- c(
+            "product_code"
+            , "station_id"
+            , "year"
+            , "month"
+            , "day"
+            , "global_solar_exposure"
+          )
+        }
+        return(df)  
+        
+      }, error = function(err){
+        
+        # record the errors so we can look at them later.
+        new_index = length(errors$error)+1
+        errors$station_id[new_index] <- station_id
+        errors$ncc[new_index] <- ncc
+        errors$error[new_index] <- err
+        
+      })
+      
+      return(df)
+    }
+    
+    getHistoricalWeatherData <- function(driver){
+      
+      weather_station <- data.frame(dbReadTable(connection, "weather_stations"))
+      
+      station_ids <- as.vector(weather_station$station_id)
+      #station_ids <- head(station_ids, 2) # limit the number of weather stations for testing purposes
+      
+      # This is the format of the url to a page which has a link to the zip file we want to download
+      data_url_template <- "http://www.bom.gov.au/jsp/ncc/cdio/weatherData/av?p_nccObsCode=%s&p_display_type=dailyDataFile&p_startYear=&p_c=&p_stn_num=%s"
+      
+      min_temp_ncc <- 123
+      max_tem_ncc <- 122
+      rinfall_ncc <- 136
+      solar_exposure <- 193
+      
+      for(station_id in station_ids){
+        
+        # Thsi for loop cold be refactored further but since this is a run once task its not really worth it.
+        print(paste("collecting min temp data for weather station", station_id))
+        min_temp_df <- getWeatherStationData(data_url_template, min_temp_ncc, station_id)
+        if(is.data.frame(min_temp_df)){
+          print(paste("writing min temp data for weather station", station_id))
+          dbWriteTable(connection, "daily_minimum_temperature", min_temp_df, append = TRUE)
+        }else{
+          print('an error occured, check errors log.')
+        }
+        
+        
+        print(paste("collecting max temp data for weather station", station_id))
+        max_temp_df <- getWeatherStationData(data_url_template, max_tem_ncc, station_id)
+        if(is.data.frame(max_temp_df)){
+          print(paste("writing max temp data for weather station", station_id))
+          dbWriteTable(connection, "daily_maximum_temperature", max_temp_df, append = TRUE)
+        }else{
+          print('an error occured, check errors log.')
+        }
+        
+        
+        print(paste("collecting rainfall data for weather station", station_id))
+        rainfall_df <- getWeatherStationData(data_url_template, rinfall_ncc, station_id)
+        if(is.data.frame(rainfall_df)){
+          print(paste("writing rainfall data for weather station", station_id))
+          dbWriteTable(connection, "daily_rainfall", rainfall_df, append = TRUE)
+        }else{
+          print('an error occured, check errors log.')
+        }
+        
+        print(paste("collecting solar exposure data for weather station", station_id))
+        solar_df <- getWeatherStationData(data_url_template, solar_exposure, station_id)
+        if(is.data.frame(solar_df)){
+          print(paste("writing solar exposure data for weather station", station_id))
+          dbWriteTable(connection, "daily_solar_exposure", solar_df, append = TRUE)
+        }else{
+          print('an error occured, check errors log.')
+        }
+        
+      }
+      
+    }
+    
+    convertBomDBToRDS <- function(){
+      
+      bom_weather_stations_df <- dbReadTable(connection, "weather_stations")
+      bom_daily_minimum_temperature_df <- dbReadTable(connection, "daily_minimum_temperature")
+      bom_daily_maximum_temperature_df <- dbReadTable(connection, "daily_maximum_temperature")
+      bom_daily_rainfall_df <- dbReadTable(connection, "daily_rainfall")
+      bom_daily_solar_exposure_df <- dbReadTable(connection, "daily_solar_exposure")
+      
+      saveRDS(bom_weather_stations_df, file = file.path(ensureBOMCachePath(), "weather_stations.rds"))
+      saveRDS(bom_daily_minimum_temperature_df, file = file.path(ensureBOMCachePath(), "daily_minimum_temperature.rds"))
+      saveRDS(bom_daily_maximum_temperature_df, file = file.path(ensureBOMCachePath(), "daily_maximum_temperature.rds"))
+      saveRDS(bom_daily_rainfall_df, file = file.path(ensureBOMCachePath(), "daily_rainfall.rds"))
+      saveRDS(bom_daily_solar_exposure_df, file = file.path(ensureBOMCachePath(), "daily_solar_exposure.rds"))
+      
+    }
+    
+    ImportFiles <- list.files(paste0(getwd(), "/data/BOM/"), pattern="*.rds")
+    if (length(ImportFiles) > 0) {
+        for (file in ImportFiles) {
+            if (!str_detect(file, "_v2")) {
+                if (!exists(paste0("bom_",str_replace(file,".rds","")))) {
+                    assign(paste0("bom_",str_replace(file,".rds","")), readRDS(paste0(getwd(), "/data/BOM/", file)))
+                }
+            }
+        }
+    } else {
+        print("stop")
+        #Open
+        driver <- getRemoteDriver()
+        driver$open()
+    
+        #Get
+        getWeatherStationDetails(driver)
+        getHistoricalWeatherData(driver)
+    
+        #Write
+        convertBomDBToRDS()
+    
+        #Close
+        driver$close()
+        rm(driver)
+    }
+    
+    # Clean Up
+    rm(ImportFiles, file, connection, errors)
+
+}
+```
+
+```{r GET BOM Solar Farm Data, echo=FALSE, eval=FALSE, results="hide"}
+# Credit to Michael Gordon for helping with the Code in this chunk.
+
+if (FALSE) {
+
+    if (exists("bom_solar_farms")) {
+        # Do nothing...
+    } else { 
+        if (file.exists(paste0(getwd(),"/data/BOM/","solar_farms",".rds"))) {
+            assign("bom_solar_farms", readRDS(paste0(getwd(),"/data/BOM/","solar_farms",".rds")))
+        } else {
+                    
+            API_KEY = "<your google maps api key goes here>"
+            
+            location_query_cache <- dict()
+            
+            # list of solor farms obtained from:
+            # https://www.canstarblue.com.au/solar-power/solar-farms-australia/
+            solar_farms_raw <- c(
+                "Broken Hill Solar Plant, 53MW, NSW"
+                , "Moree Solar Farm, 56MW, NSW"
+                , "Parkes Solar Farm, 65MW, NSW"
+                , "Beryl Solar Farm, 87MW, NSW"
+                , "Nyngan Solar Plant, 102MW, NSW"
+                , "Coleambally Solar Farm, 150MW, NSW"
+                , "Gannawarra Solar Farm, 50MW, VIC"
+                , "Wemen Solar Farm, 88MW, VIC"
+                , "Bannerton Solar Park, 88MW, VIC"
+                , "Karadoc Solar Fam, 90MW, VIC"
+                , "Numurkah Solar Fam, 100MW, VIC"
+                , "Hayman Solar Farm, 50MW, QLD"
+                , "Ethridge Solar Farm, 50MW, QLD"
+                , "Childers Solar Farm, 56MW, QLD"
+                , "Whitsunday Solar Farm, 57.5MW, QLD"
+                , "Hamilton Solar Farm, 57.5 MW, QLD"
+                , "Emerald Solar Park, 68MW, QLD"
+                , "Susan River Solar Farm, 75MW, QLD"
+                , "Lilyvale Solar Farm, 100MW, QLD"
+                , "Clare Solar Farm, 100MW, QLD"
+                , "Darling Downs Solar Farm, 110MW, QLD"
+                , "Ross River Solar Farm, 116MW, QLD"
+                , "Sun Metals Solar Farm, 124MW, QLD"
+                , "Daydream Solar Farm, 168MW, QLD"
+                , "Tailem Bend Solar Power Project, 108MW, SA"
+                , "Bungala Solar Power Project, 220MW, SA"
+                , "Merredin Solar Farm, 132MW, WA"
+                , "Badgingarra Renewable Facility, 147.5MW, WA"
+                
+            )
+            
+            solar_farms <- list(
+                names = c()
+                , capacities = c()
+                , states = c()
+                , lats = c()
+                , lons = c()
+            )
+            
+            
+            get_location_data <- function(address, print_messages = FALSE){
+                
+                api_url <- "https://maps.googleapis.com/maps/api/geocode/json"
+                
+                print(paste0("calling api with address: (", address, ")..."))
+                args <- list(address = address, sensor = 'false', region = 'Australia', key= API_KEY)
+                response <- GET(api_url, query = args)
+                response_json <- content(response, "text")
+                details <- fromJSON(response_json)
+                if(print_messages) print(response_json)
+                
+                
+                    
+                result <- list(
+                    lat = details$results$geometry$location$lat
+                    , lon = details$results$geometry$location$lng
+                )
+                
+                return(result)
+            }
+            
+            counter = 1
+            for(solar_farm in solar_farms_raw){
+                
+                address_parts <- strsplit(solar_farm, ', ')
+                
+                name <- address_parts[[1]][[1]]
+                capacity <- address_parts[[1]][[2]]
+                state <- address_parts[[1]][[3]]
+                
+                
+                arg <- paste(name, state, sep = ', ')
+                result <- get_location_data(arg)
+                
+                
+                solar_farms$names[counter] <- name
+                solar_farms$capacities[counter] <- capacity
+                solar_farms$states[counter] <- state
+                solar_farms$lats[counter] <- result$lat
+                solar_farms$lons[counter] <- result$lon
+                
+                counter <- counter + 1
+            }
+            
+            solar_farms_df <- as.data.frame(solar_farms)
+            
+            saveRDS(solar_farms_df, file = paste0(getwd(), "/data/BOM/solar_farms.rds"))
+            
+            bom_solar_farms <- solar_farms_df
+            
+            rm(solar_farms_df,API_KEY,solar_farms_raw,counter,solar_farm,solar_farms,address_parts,name,capacity,state,arg,result,)
+    
+        }
+    }
+}
+```
+
+```{r GET BOM Wind Farm Data, echo=FALSE, eval=FALSE, results="hide"}
+# Credit to Michael Gordon for helping with the Code in this chunk.
+
+if (FALSE) {
+
+    if (exists("bom_wind_farms")) {
+        # Do nothing...
+    } else { 
+        if (file.exists(paste0(getwd(),"/data/BOM/","wind_farms",".rds"))) {
+            assign("bom_wind_farms", readRDS(paste0(getwd(),"/data/BOM/","wind_farms",".rds")))
+        } else {
+    
+            # wind farms list:
+            # https://en.wikipedia.org/wiki/List_of_wind_farms_in_Australia
+            
+            states_lookup <- dict()
+            
+            states_lookup[['New South Wales']] <- 'NSW'
+            states_lookup[['Victoria']] <- 'VIC'
+            states_lookup[['South Australia']] <- 'SA'
+            states_lookup[['Western Australia']] <- 'WA'
+            states_lookup[['Tasmania']] <- 'TAS'
+            
+            get_remote_driver <- function(){
+                # Run this to start the selenium server
+                # sudo docker run -d -p 4445:4444 selenium/standalone-chrome
+                remote_driver <- remoteDriver(
+                    remoteServerAddr = "localhost",
+                    port = 4445L,
+                    browserName = "chrome"
+                )
+                return(remote_driver)
+            }
+            
+            
+            get_wind_farms_table <- function(){
+                
+                tables <- driver$findElements("css", ".wikitable")
+                
+                for(table in tables){
+                    
+                    caption <- table$findChildElement('tag name', 'caption')
+                    caption_text <- caption$getElementText()
+                    
+                    if(str_starts(caption_text, "Large operational wind farms in Australia")){
+                        
+                        return(table)
+                    }
+                }
+            }
+            
+            convert_to_decimal_degrees <- function(coordinates){
+                # https://www.latlong.net/degrees-minutes-seconds-to-decimal-degrees
+                # " N = "+" S = "-" E = "+" W = "-"
+                # Decimal Degrees = degrees + (minutes/60) + (seconds/3600)
+                # DD = d + (min/60) + (sec/3600)
+                
+                # the regex approach fails, although the regex pattern works on regex101, R does handle unicode chars well
+                # pattern <- '(^\\d*)°(\\d*)′\(\d*)″([A-Z])'
+                # R or rstudio can't handle prime and double prime symbol
+                # pattern <- '(^\\d*)°(\\d)\u2032(\\d*)\u2033([A-Z])'
+                matches <- strsplit(coordinates, '°|\u2033|\u2032') # \u2033 == double prime, \u2032 == prime
+                index <- 1
+                degrees <- suppressWarnings(as.numeric(matches[[1]][index]))
+                index <- 1 + index
+                
+                minutes <- 0
+                if(grepl('\u2032', coordinates)){
+                    minutes <- suppressWarnings(as.numeric(matches[[1]][index]))
+                    index <- 1 + index
+                }
+                
+                seconds <- 0
+                if(grepl('\u2033', coordinates)){
+                    seconds <- suppressWarnings(as.numeric(matches[[1]][index]))
+                    index <- 1 + index
+                }
+                
+                direction <- matches[[1]][index]
+                
+                minutes_converted <- 0
+                if(!is.na(minutes)){
+                    minutes_converted <- (minutes/60)
+                }
+                
+                seconds_converted <- 0
+                if(!is.na(seconds)){
+                    seconds_converted <- (seconds/3600)
+                }
+                
+                converted <- degrees + minutes_converted + minutes_converted
+                if(direction == 'S' | direction == 'W'){
+                    converted <- -converted
+                } 
+                
+                return(converted)
+            }
+            
+            driver <- get_remote_driver()
+            
+            driver$open()
+            driver$navigate("https://en.wikipedia.org/wiki/List_of_wind_farms_in_Australia")
+            
+            
+            farm_table <- get_wind_farms_table()
+            rows <- farm_table$findChildElements('css', 'tbody tr')
+            
+            wind_farms <- list(
+                name = c()
+                , capacity = c()
+                , state = c()
+                , lat = c()
+                , lon = c()
+                , owner = c()
+            )
+            counter <- 1
+            for(row in rows){
+                
+                t_columns <- row$findChildElements('tag name', 'td')
+                
+                name <- t_columns[[1]]$getElementText()[[1]]
+                capacity <- t_columns[[2]]$getElementText()[[1]]
+                owner <- t_columns[[3]]$getElementText()[[1]]
+                state <- t_columns[[4]]$getElementText()[[1]]
+                coordinates <- t_columns[[5]]$getElementText()[[1]]
+                
+                coordinates <- strsplit(coordinates, ' ')
+                lat <- convert_to_decimal_degrees(coordinates[[1]][1])
+                lon <- convert_to_decimal_degrees(coordinates[[1]][2])
+                
+                wind_farms$name[counter] <- name
+                wind_farms$capacity[counter] <- capacity
+                wind_farms$state[counter] <- states_lookup[[state]]
+                wind_farms$lat[counter] <- lat
+                wind_farms$lon[counter]  <- lon
+                wind_farms$owner[counter] <- owner
+                
+                print(paste(name, capacity, owner, state, coordinates,lat,lon))
+                
+                
+                counter <- 1 + counter
+            }
+            
+            driver$close()
+            
+            wind_farms_df <- as.data.frame(wind_farms)
+            saveRDS(wind_farms_df, file = paste0(getwd(), "/data/BOM/wind_farms.rds"))
+            
+            bom_wind_farms <- wind_farms_df
+            
+            rm(wind_farms_df,counter,t_columns,name,capacity,owner,state,coordinates,lat,lon,row,rows,wind_farms,farm_table,driver,states_lookup)
+            
+        }
+    }
+}
+```
+
+```{r FIX BOM De-Duplicate Weather Data, echo=FALSE, eval=FALSE, results="hide"}
+# Credit to Michael Gordon for helping with the Code in this chunk.
+
+if (FALSE) {
+
+    API_KEY = "<your google maps api key goes here>"
+    
+    location_query_cache <- dict()
+    
+    load_weather_stations <- function(){
+        stations <- readRDS(paste0(getwd(), "/data/BOM/weather_stations.rds"))
+        return(stations)
+    }
+    
+    load_min_temp_data <- function(){
+        min_temp <- readRDS(paste0(getwd(), "/data/BOM/daily_minimum_temperature.rds"))
+        return(min_temp)
+    }
+    
+    load_max_temp_data <- function(){
+        max_temp <- readRDS(paste0(getwd(), "/data/BOM/daily_maximum_temperature.rds"))
+        return(max_temp)
+    }
+    
+    load_rainfall_data <- function(){
+        rainfall_data <- readRDS(paste0(getwd(), "/data/BOM/daily_rainfall.rds"))
+        return(rainfall_data)
+    }
+    
+    load_solar_exposure_data <- function(){
+        solar_exposure_data <- readRDS(paste0(getwd(), "/data/BOM/daily_solar_exposure.rds"))
+        return(solar_exposure_data)
+    }
+    
+    get_location_data <- function(lat, lng, address, print_messages = FALSE, use_cache = TRUE){
+        
+        lat_lon_arg <- paste(lat, lng, sep = ',')
+        api_url <- "https://maps.googleapis.com/maps/api/geocode/json"
+        
+        if(use_cache & lat_lon_arg %in% location_query_cache$keys()){
+            print("retreiving from cache")
+            result <- location_query_cache[[lat_lon_arg]][[1]]
+            return(result)
+            
+        } else {
+            print("calling api")
+            
+            response <- GET(api_url, query = list(latlng = lat_lon_arg, key= API_KEY))
+            response_json <- content(response, "text")
+            details <- fromJSON(response_json)
+            if(print_messages) print(response_json)
+            ac <- details$results$address_components[[1]]
+            postcode <- NA
+            region <- NA
+            state <- NA
+            
+            if (!is.null(ac)) {
+                # Iterate the types of the current address_components.
+                for (j in 1:length(ac$types)) {
+                    
+                    if (ac$types[[j]][[1]] == "postal_code") {
+                        postcode <- ac$long_name[[j]]
+                        
+                    }else if("administrative_area_level_2" %in% ac$types[[j]][[1]]){
+                        region <- ac$short_name[[j]]
+                        
+                    }else if("administrative_area_level_1" %in% ac$types[[j]][[1]]){
+                        state <- ac$short_name[[j]]
+                        if(state == 'JBT'){
+                            state <- 'NSW'
+                        }
+                    }
+                }
+            }
+            
+            if(is.na(postcode) | is.na(region)){
+                
+                if(!is.na(state)){
+                    address <- paste(address, state, "Australia", sep = ', ')
+                }
+                print(paste0("re-calling api with address: (", address, ")..."))
+                args <- list(address = address, sensor = 'false', region = 'Australia', key= API_KEY)
+                response <- GET(api_url, query = args)
+                response_json <- content(response, "text")
+                details <- fromJSON(response_json)
+                if(print_messages) print(response_json)
+                ac <- details$results$address_components[[1]]
+                
+                if (!is.null(ac)) {
+                    # Iterate the types of the current address_components.
+                    for (j in 1:length(ac$types)) {
+                        
+                        if (is.na(postcode) & ac$types[[j]][[1]] == "postal_code") {
+                            postcode <- ac$long_name[[j]]
+                            
+                        }else if(is.na(region) & "administrative_area_level_2" %in% ac$types[[j]][[1]]){
+                            region <- ac$short_name[[j]]
+                            
+                        }
+                    }
+                }
+            }
+            
+            location_query_cache[[lat_lon_arg]] <- list(lat_lon_arg = list(postcode = postcode, region = region, state = state))
+            
+            result <- location_query_cache[[lat_lon_arg]][[1]]
+            
+            return(result)
+        }
+        # Norah Head NSW 2263
+    }
+    
+    get_location_state <- function(lat, lng, name){
+        result <- get_location_data(lat, lng, name)
+        return(result$state)
+    }
+    
+    get_location_region <- function(lat, lng, name){
+        result <- get_location_data(lat, lng, name)
+        return(result$region)
+    }
+    
+    get_location_postcode <- function(lat, lng, name){
+        result <- get_location_data(lat, lng, name)
+        return(result$postcode)
+    }
+    
+    states <- c(
+        "ACT"
+        , "NSW"
+        , "NT"
+        , "QLD"
+        , "SA"
+        , "TAS"
+        , "VIC"
+        , "WA"
+    )
+    
+    de_duplicate_and_enhance_weather_station_data <- function(){
+        
+        weather_stations <- load_weather_stations()
+        
+        weather_stations <- weather_stations %>%
+            mutate(
+                state = mapply(get_location_state, lat, lon, name)
+                , region = mapply(get_location_region, lat, lon, name)
+                , postcode = mapply(get_location_postcode, lat, lon, name)
+            )
+        
+        # problem_states <- weather_stations %>% filter(!(state %in% states))
+        # problem_postcodes <- weather_stations %>% filter(is.na(postcode))
+        # problem_regions <- weather_stations %>% filter(is.na(region))
+        
+        collapsed_stations <- weather_stations %>% 
+            group_by(name, station_id) %>%
+            summarise(
+                state = first(state)
+                , lat = first(lat)
+                , lon = first(lon)
+                , elevation = first(elevation)
+                , region = first(region)
+                , postcode = first(postcode)
+            )
+        
+        saveRDS(collapsed_stations, file = paste0(getwd(), "/data/BOM/weather_stations_v2.rds"))
+    }
+    
+    de_duplicate_min_temp <- function(){
+        
+        min_temp <- load_min_temp_data()
+        min_temp <- min_temp %>% 
+            group_by(station_id, year, month, day) %>%
+            summarise(
+                min_temp = first(min_temp)
+                , days_of_accumulation = first(days_of_accumulation)
+                , quality = first(quality)
+                , product_code = first(product_code)
+            )
+        
+        saveRDS(min_temp, file = paste0(getwd(), "/data/BOM/daily_minimum_temperature_v2.rds"))
+        rm(min_temp)
+    }
+    
+    de_duplicate_max_temp <- function(){
+        
+        max_temp <- load_max_temp_data()
+        max_temp <- max_temp %>% 
+            group_by(station_id, year, month, day) %>%
+            summarise(
+                max_temp = first(max_temp)
+                , days_of_accumulation = first(days_of_accumulation)
+                , quality = first(quality)
+                , product_code = first(product_code)
+            )
+        saveRDS(max_temp, file = paste0(getwd(), "/data/BOM/daily_maximum_temperature_v2.rds"))
+        rm(max_temp)
+    }
+    
+    de_duplicate_rainfall_data <- function(){
+        
+        rainfall_data <- load_rainfall_data()
+        rainfall_data <- rainfall_data %>% 
+            group_by(station_id, year, month, day) %>%
+            summarise(
+                rainfall_millimetres = first(rainfall_millimetres)
+                , days_of_accumulation = first(days_of_accumulation)
+                , quality = first(quality)
+                , product_code = first(product_code)
+            )
+        saveRDS(rainfall_data, file = paste0(getwd(), "/data/BOM/daily_rainfall_v2.rds"))
+        rm(rainfall_data)
+    }
+    
+    de_duplicate_solar_exposure_data <- function(){
+        
+        solar_exposure_data <- load_solar_exposure_data()
+        solar_exposure_data <- solar_exposure_data %>% 
+            group_by(station_id, year, month, day) %>%
+            summarise(
+                global_solar_exposure = first(global_solar_exposure)
+                , product_code = first(product_code)
+            )
+        saveRDS(solar_exposure_data, file = paste0(getwd(), "/data/BOM/daily_solar_exposure_v2.rds"))
+        rm(solar_exposure_data) 
+    }
+    
+    # Import data
+    ImportFiles <- list.files(paste0(getwd(), "/data/BOM/"), pattern="*_v2.rds")
+    if (length(ImportFiles) > 0) {
+        for (file in ImportFiles) {
+            ImportFile <- paste0("bom_",str_replace(file,".rds",""))
+            if (!exists(ImportFile)) {
+                assign(ImportFile, readRDS(paste0(getwd(), "/data/BOM/", file)))
+            }
+            if (ImportFile %>% get() %>% is.grouped_df()) {
+                assign(ImportFile, ImportFile %>% get() %>% ungroup())
+            }
+        }
+    } else {
+        de_duplicate_and_enhance_weather_station_data()
+        de_duplicate_min_temp()
+        de_duplicate_max_temp()
+        de_duplicate_rainfall_data()
+        de_duplicate_solar_exposure_data()
+    }
+    
+    # Clean up
+    rm(file, ImportFiles, ImportFile)
+}
+```
+
+```{r FIX BOM Join Temperature Data, echo=FALSE, eval=FALSE, results="hide"}
+
+if (FALSE) {
+    # Review the data
+    glimpse(bom_daily_maximum_temperature_v2)
+    glimpse(bom_daily_minimum_temperature_v2)
+    
+    # Prove if all column names match
+    all(names(bom_daily_maximum_temperature_v2) == names(bom_daily_minimum_temperature_v2))
+    
+    # Review the dimensions
+    DataFrameDimensions(c("bom_daily_maximum_temperature","bom_daily_minimum_temperature"))
+    # You'll find that they are both nearly 10million records long. This is too much data to handle.
+    
+    # Review the min & max of each.
+    bom_daily_maximum_temperature_v2 %>% 
+        select(year) %>% 
+        range()
+    bom_daily_minimum_temperature_v2 %>% 
+        select(year) %>% 
+        range()
+    # You'll find they both go back to 1859. We'll need to reduce this to just the last 10 years.
+    
+    # Manipulate the frames
+    bom_daily_max_temp <- bom_daily_maximum_temperature_v2 %>%      #<-- Re-define the original frame
+        select(-product_code,-quality) %>%                          #<-- We don't need these fields
+        filter(year>2008) %>%                                       #<-- Reduce the size of the frames considerably
+        rename(max_days_of_accumulation = days_of_accumulation) %>% #<-- Rename to make it easier to read post-join
+        mutate( join = paste(station_id,year,month,day,sep="_")     #<-- This is the field that we will join on
+              , date = as.Date(paste(year,month,day,sep="/"))       #<-- Add this field to then remove three other fields
+              ) %>% 
+        select(-year,-month,-day)                                   #<-- Clean the unwanted fields
+    
+    bom_daily_min_temp <- bom_daily_minimum_temperature_v2 %>%      #<-- Replicate these steps over the other temp frame
+        select(-product_code,-quality) %>% 
+        filter(year>2008) %>% 
+        rename(min_days_of_accumulation = days_of_accumulation) %>% 
+        mutate( join = paste(station_id,year,month,day,sep="_")
+             , date = as.Date(paste(year,month,day,sep="/"))
+             ) %>% 
+        select(-year,-month,-day)
+    
+    # Join them together
+    bom_daily_temperature <- bom_daily_min_temp %>% 
+        full_join(bom_daily_max_temp %>% select(-station_id,-date), by="join") %>% 
+        select(station_id,date,everything(),-join)
+    
+    # Re-check the dimensions
+    DataFrameDimensions("bom_daily_temperature")
+}
+```
+
+```{r LOAD Data, echo=FALSE, eval=TRUE}
+# Load all data ----
+files <- list( AEMO=c("aemo_Consolidated")
+             , BOM=c("bom_DailyMaxTemp"
+                    ,"bom_DailyMinTemp"
+                    ,"bom_DailyRainfall"
+                    ,"bom_DailySolarExposure"
+                    ,"bom_SolarFarms"
+                    ,"bom_WeatherStations"
+                    ,"bom_WindFarms"
+                    )
+             , EnergyMarket=c("eng_FuelMixCalendar"
+                             ,"eng_FuelMixFinancial"
+                             )
+             )
+categ <- "AEMO"
+for (file in files[[categ]]) {
+        assign(file, read_rds(paste0(getwd(), "/Data/", categ, "/", file, ".rds")))
+    }
+for (category in names(files)) {
+    for (file in files[[category]]) {
+        assign(file, read_rds(paste0(getwd(), "/Data/", category, "/", file, ".rds")))
+    }
+}
+rm(files, category, file, categ)
+
+assign("aemo_Consolidated", read_rds(paste0(getwd(), "/Data/AEMO/aemo_ConsolidatedOld.rds")))
+
+```
+
+```{r FIX Data, echo=FALSE, eval=FALSE, results="hide", rows.print=50, cols.print=30, fig.width=10, fig.height=5}
+# Skip the next bit. The .RDS's are set up as needed. 
+if (FALSE) {
+  
+    # Fix BOM data ----
+    
+    if (FALSE) {
+        # Fix Max Temp ----
+        bom_DailyMaxTemp %<>% 
+            select(-product_code,-quality,-days_of_accumulation) %>% 
+            filter(year>2008) %>% 
+            mutate( join = paste(station_id,year,month,day,sep="_") 
+                  , date = as.Date(paste(year,month,day,sep="/")) 
+                  , month_id = paste0( date %>% ymd %>% year %>% as.character
+                                     , date %>% ymd %>% month %>% str_pad(width=2,pad="0")
+                                     )
+                  ) %>% 
+            select(-year,-month,-day)
+        
+        # Fix Min Temp ----
+        bom_DailyMinTemp %<>% 
+            select(-product_code,-quality,-days_of_accumulation) %>% 
+            filter(year>2008) %>% 
+            mutate( join = paste(station_id,year,month,day,sep="_")
+                  , date = as.Date(paste(year,month,day,sep="/"))
+                  , month_id = paste0( date %>% ymd %>% year %>% as.character
+                                     , date %>% ymd %>% month %>% str_pad(width=2,pad="0")
+                                     )
+                 ) %>% 
+            select(-year,-month,-day)
+        
+        # Fix Rainfall ----
+        bom_DailyRainfall %<>% 
+            select(-product_code,-quality,-days_of_accumulation) %>% 
+            filter(year>2008) %>%
+            mutate( join = paste(station_id,year,month,day,sep="_")
+                  , date = as.Date(paste(year,month,day,sep="/"))
+                  , month_id = paste0( date %>% ymd %>% year %>% as.character
+                                     , date %>% ymd %>% month %>% str_pad(width=2,pad="0")
+                                     )
+                 ) %>% 
+            select(-year,-month,-day)
+        
+        # Fix Solar Exposure ----
+        bom_DailySolarExposure %<>% 
+            select(-product_code) %>% 
+            filter(year>2008) %>% 
+            rename(solar_exposure = global_solar_exposure) %>% 
+            mutate( join = paste(station_id,year,month,day,sep="_")
+                  , date = as.Date(paste(year,month,day,sep="/"))
+                  , month_id = paste0( date %>% ymd %>% year %>% as.character
+                                     , date %>% ymd %>% month %>% str_pad(width=2,pad="0")
+                                     )
+                 ) %>% 
+            select(-year,-month,-day)
+    
+    }
+    
+    
+    # Fix AEMO data ----
+    aemo_Consolidated %<>% 
+        rename_all(funs(str_to_lower(.))) %>% 
+        rename( state = region
+              , tot_demand = totaldemand
+              , price = rrp
+              , str_datetime = settlementdate
+              ) %>% 
+        select(-periodtype) %>%
+        separate(str_datetime, c("str_date","str_time"), sep=" ", remove=F) %>% 
+        mutate( state = str_replace(state,"1","")
+              , str_datetime = ifelse(str_length(str_datetime>16), str_left(str_datetime,16), str_datetime)
+              , datetime = ymd_hm(str_datetime)
+              , date = ymd(str_date)
+              ) %>% 
+        # filter(year(date)>2008) %>% 
+        rename(time=str_time, demand=tot_demand) %>% 
+        select(state,date,time,demand,price)
+    
+}
+```
+
+
+<!-- Set Up Data -->
+
+```{r AEMO: Set Up, echo=FALSE, eval=TRUE, results=FALSE, include=FALSE, warning=FALSE}
+# Master ----
+aemo_Master <- aemo_Consolidated %>%
+    mutate(month_id=paste0(date %>% ymd %>% year %>% as.character
+                          ,date %>% ymd %>% month %>% str_pad(width=2,pad="0")
+                          )
+          ,week_id=paste0(date %>% ymd %>% year %>% as.character
+                         ,date %>% ymd %>% week %>% str_pad(width=2,pad="0")
+                         )
+          ,year_id=paste0(date %>% ymd %>% year %>% as.character)
+          ) %>% 
+    # filter(year_id > 2008) %>% 
+    select(state,year_id,month_id,week_id,everything()) 
+
+
+# Yearly ----
+aemo_Yearly <- aemo_Master %>% 
+    group_by(state,year_id) %>% 
+    summarise(min_demand=min(demand)
+             ,max_demand=max(demand)
+             ,rng_demand=diff(range(demand))
+             ,avg_demand=mean(demand)
+             ,min_price=min(price)
+             ,max_price=max(price)
+             ,rng_price=diff(range(price))
+             ,avg_price=mean(price)
+             ) %>% 
+    ungroup()
+
+
+# Monthly ----
+aemo_Monthly <- aemo_Master %>% 
+    group_by(state,month_id) %>% 
+    summarise(min_demand=min(demand)
+             ,max_demand=max(demand)
+             ,rng_demand=diff(range(demand))
+             ,avg_demand=mean(demand)
+             ,min_price=min(price)
+             ,max_price=max(price)
+             ,rng_price=diff(range(price))
+             ,avg_price=mean(price)
+             ) %>% 
+    ungroup()
+
+
+# Set AEMO Weekly ----
+aemo_Weekly <- aemo_Master %>%
+    group_by(state,week_id) %>% 
+    summarise(min_demand=min(demand)
+             ,max_demand=max(demand)
+             ,rng_demand=diff(range(demand))
+             ,avg_demand=mean(demand)
+             ,min_price=min(price)
+             ,max_price=max(price)
+             ,rng_price=diff(range(price))
+             ,avg_price=mean(price)
+             ) %>% 
+    ungroup()
+
+
+# TSDF's ----
+# Decide Features
+# Features <- c("avg_price")
+Features <- c("avg_price","rng_price")
+# Features <- c("avg_price","rng_price","avg_demand","rng_demand")
+
+for (Feature in Features) {
+    
+    # Yearly ----
+    assign(paste("aemo_YearlyTSDF",Feature,sep="_")
+          ,aemo_Yearly %>%
+              filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+              select(state,Feature,year_id) %>% 
+              (function(x) {
+                  states <- x %>% 
+                      select(state) %>% 
+                      distinct() %>% 
+                      pull()
+                  df_return <- x %>% 
+                      select(year_id) %>% 
+                      distinct()
+                  for (str_state in states) {
+                      df_return <- x %>% 
+                          filter(state==str_state) %>% 
+                          rename_at(vars(starts_with("avg")), funs(paste0(str_state))) %>% 
+                          rename_at(vars(starts_with("rng")), funs(paste0(str_state))) %>% 
+                          select(-state) %>% 
+                          left_join(x=df_return, y=., by="year_id")
+                      }
+                  return(df_return)
+                  }) %>% 
+              arrange(year_id) %>% 
+              select(-year_id)
+          )
+    
+    
+    # Monthly ----
+    assign(paste("aemo_MonthlyTSDF",Feature,sep="_")
+          ,aemo_Monthly %>% 
+              filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+              select(state,Feature,month_id) %>% 
+              (function(x) {
+                  states <- x %>% 
+                      select(state) %>% 
+                      distinct() %>% 
+                      pull()
+                  df_return <- x %>% 
+                      select(month_id) %>% 
+                      distinct()
+                  for (str_state in states) {
+                      df_return <- x %>% 
+                          filter(state==str_state) %>% 
+                          rename_at(vars(starts_with("avg")), funs(paste0(str_state))) %>%
+                          rename_at(vars(starts_with("rng")), funs(paste0(str_state))) %>%
+                          select(-state) %>% 
+                          left_join(x=df_return, y=., by="month_id")
+                      }
+                  return(df_return)
+                  }) %>% 
+              arrange(month_id) %>% 
+              select(-month_id)
+          )
+    
+    
+    # Weekly ----
+    assign(paste("aemo_WeeklyTSDF",Feature,sep="_")
+          ,aemo_Weekly %>%
+              filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+              select(state,Feature,week_id) %>% 
+              (function(x) {
+                  states <- x %>% 
+                      select(state) %>% 
+                      distinct() %>% 
+                      pull()
+                  df_return <- x %>% 
+                      select(week_id) %>% 
+                      distinct()
+                  for (str_state in states) {
+                      df_return <- x %>% 
+                          filter(state==str_state) %>% 
+                          rename_at(vars(starts_with("avg")), funs(paste0(str_state))) %>% 
+                          rename_at(vars(starts_with("rng")), funs(paste0(str_state))) %>% 
+                          select(-state) %>% 
+                          left_join(x=df_return, y=., by="week_id")
+                      }
+                  return(df_return)
+                  }) %>% 
+              arrange(week_id) %>% 
+              select(-week_id)
+          )
+    
+}
+
+
+# TS's ----
+for (Feature in Features) {
+    
+    # Yearly ----
+    assign(paste("aemo_YearlyTS",Feature,sep="_")
+          ,paste("aemo_YearlyTSDF",Feature,sep="_") %>% 
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(1999,1),frequency=1)
+          )
+    
+    # Monthly ----
+    assign(paste("aemo_MonthlyTS",Feature,sep="_")
+          ,paste("aemo_MonthlyTSDF",Feature,sep="_") %>%
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(1999,1),frequency=12)
+          )
+    
+    # Weekly ----
+    assign(paste("aemo_WeeklyTS",Feature,sep="_")
+          ,paste("aemo_WeeklyTSDF",Feature,sep="_") %>% 
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(1999,1),frequency=52)
+          )
+    
+}
+
+```
+
+```{r AEMO: Validate, echo=FALSE, eval=TRUE, results=FALSE, include=FALSE, warning=FALSE}
+# Check dfs ----
+    # Yearly
+    aemo_Yearly %>% 
+        mutate(year_id=as.numeric(year_id)) %>% 
+        filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+        group_by(state) %>% 
+        summarise(min=min(year_id)
+                 ,max=max(year_id)
+                 ,num=n()
+                 ,len=length(unique(year_id))
+                 )
+
+    # Monthly
+    aemo_Monthly %>% 
+        mutate(month_id=as.numeric(month_id)) %>% 
+        filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+        group_by(state) %>% 
+        summarise(min=min(month_id)
+                 ,max=max(month_id)
+                 ,num=n()
+                 ,len=length(unique(month_id))
+                 )
+    
+    # Weekly
+    aemo_Weekly %>% 
+        mutate(week_id=as.numeric(week_id)) %>% 
+        filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+        group_by(state) %>% 
+        summarise(min=min(week_id)
+                 ,max=max(week_id)
+                 ,num=n()
+                 ,len=length(unique(week_id))
+                 )
+```
+
+
+<!-- First Round Visualisation -->
+
+```{r AEMO: Visualise, echo=FALSE, eval=TRUE, results=FALSE, include=FALSE, fig.width=15, fig.height=10}
+# Plot ts() objects ----
+# for (Feature in Features) {
+for (Feature in c("avg_price")) {
+    
+    # for (Time in c("Year","Month","Week")) {
+    for (Time in c("Month")) {
+        
+        print(paste0("aemo_",Time,"lyTS_",Feature) %>% 
+            get() %>% 
+            autoplot() +
+            facet_wrap(~series, ncol=1) +
+            geom_smooth(method="lm", size=1) +
+            scale_x_continuous(breaks=seq(1999, 2019)) +
+            ggpubr::stat_regline_equation() +
+            theme(legend.position="top"
+                 ,panel.grid.minor.x=element_blank()
+                 ) +
+            labs(title=Feature
+                ,subtitle=paste0("By State, By ",Time)
+                ,y="Price ($/GwH)"
+                ,caption="Source=\"AEMO\""
+                ))
+    }
+    
+}
+# Noting that due to the fact that there are many outlier points in this plit, it needs to be rectified to normalise the points that are over 3 standard deviations away from the mean.
+# Also, the options are set for results=FALSE so as to not display this plot in the final knit'ed document.
+```
+
+```{r AEMO: Fix, echo=FALSE, eval=TRUE, results="hide", rows.print=50, cols.print=30, fig.width=15, fig.height=10}
+# Fix the outliers in the Monthly data ----
+# Use the outliers::scores() function to determine the outliers and replace with NA. Set to prob=0.99, and then remove those values from the data.frame.
+for (Feature in Features) {
+    aemo_MonthlyOutliers <- list()
+    for (state in c("NSW","VIC","QLD","SA")) {
+        aemo_MonthlyOutliers[[state]] <- paste("aemo_MonthlyTSDF",Feature,sep="_") %>% 
+            get() %>% 
+            select(state) %>% 
+            pull() %>% 
+            scores(type="z", prob=0.99) %>% 
+            data.frame() %>% 
+            rename_at(vars(contains(".")), funs(str_to_lower(state))) %>% 
+            rowid_to_column(state) %>% 
+            filter(.[,2]=="TRUE") %>% 
+            select(1) %>% 
+            pull()
+        assign(paste("aemo_MonthlyTSDF",Feature,sep="_")
+              ,paste("aemo_MonthlyTSDF",Feature,sep="_") %>% 
+                  get() %>% 
+                  rowid_to_column() %>% 
+                  mutate_at(.vars=vars(contains(state))
+                           ,.funs=funs(ifelse(rowid %in% aemo_MonthlyOutliers[[state]],NA,.))
+                           ) %>% 
+                  select(-rowid)
+              )
+    }
+}
+
+
+# Replace NA's ----
+# For the NA's, give a value that is the average if the values before and after the NA's.
+# Monthly
+aemo_MonthlyTSDF_avg_price %<>% 
+    mutate(NSW = ifelse(is.na(NSW), (lead(NSW)+lag(NSW))/2, NSW)
+          ,QLD = ifelse(is.na(QLD), (lead(QLD)+lag(QLD))/2, QLD)
+          ,SA  = ifelse(is.na(SA) , (lead(SA)+lag(SA))/2, SA)
+          ,VIC = ifelse(is.na(VIC), (lead(VIC)+lag(VIC))/2, VIC)
+          ,QLD = ifelse(is.na(QLD), ifelse(is.na(lag(QLD)), lag(QLD,2)+(lead(QLD)-lag(QLD,2))*(2/3), lag(QLD)+(lead(QLD,2)-lag(QLD))*(1/3)), QLD) #This is because there were two NA's in QLD in a row...
+          )
+
+# Weekly
+aemo_MonthlyTSDF_rng_price %<>% 
+    mutate(NSW = ifelse(is.na(NSW), (lead(NSW)+lag(NSW))/2, NSW)
+          ,QLD = ifelse(is.na(QLD), (lead(QLD)+lag(QLD))/2, QLD)
+          ,SA  = ifelse(is.na(SA) , (lead(SA)+lag(SA))/2, SA)
+          ,VIC = ifelse(is.na(VIC), (lead(VIC)+lag(VIC))/2, VIC)
+          ,NSW = ifelse(is.na(NSW), ifelse(is.na(lag(NSW)), lag(NSW,2)+(lead(NSW)-lag(NSW,2))*(2/3), lag(NSW)+(lead(NSW,2)-lag(NSW))*(1/3)), NSW) #This is because there were two NA's in NSW in a row...
+          ,QLD = ifelse(is.na(QLD), ifelse(is.na(lag(QLD)), lag(QLD,2)+(lead(QLD)-lag(QLD,2))*(2/3), lag(QLD)+(lead(QLD,2)-lag(QLD))*(1/3)), QLD) #This is because there were two NA's in QLD in a row...
+          )
+
+
+# Re-Set TimeSeries ----
+for (Feature in Features) {
+    # Yearly
+    assign(paste("aemo_YearlyTS",Feature,sep="_")
+          ,paste("aemo_YearlyTSDF",Feature,sep="_") %>% 
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(1999,1),frequency=1)
+          )
+    
+    # Monthly
+    assign(paste("aemo_MonthlyTS",Feature,sep="_")
+          ,paste("aemo_MonthlyTSDF",Feature,sep="_") %>%
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(1999,1),frequency=12)
+          )
+    
+    # Weekly
+    assign(paste("aemo_WeeklyTS",Feature,sep="_")
+          ,paste("aemo_WeeklyTSDF",Feature,sep="_") %>% 
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(1999,1),frequency=52)
+          )
+}
+
+```
+
+
+<!-- Cover Image -->
+
+```{r AEMO: Cover Image, echo=FALSE, eval=TRUE, results="hide", warning=FALSE, message=FALSE, fig.width=5, fig.height=5}
+element_textbox <- function(...) {
+  el <- element_text(...)
+  class(el) <- c("element_textbox", class(el))
+  el
+}
+
+element_grob.element_textbox <- function(element, ...) {
+  text_grob <- NextMethod()
+  rect_grob <- element_grob(calc_element("strip.background", theme_bw()))
+  
+  ggplot2:::absoluteGrob(
+    grid::gList(
+      element_grob(calc_element("strip.background", theme_bw())),
+      text_grob
+    ),
+    height = grid::grobHeight(text_grob), 
+    width = grid::unit(1, "npc")
+  )
+}
+
+# Generate Cover Image ----
+aemo_MonthlyTS_avg_price[,"NSW"] %>% 
+    decompose() %>% 
+    pluck("trend") %>% 
+    (function(x){
+        # Generate Plot
+        plot <- x %>% 
+            autoplot(color="darkorange") +
+            geom_smooth(color="red"
+                       ,se=FALSE
+                       ,size=1.4
+                       ,arrow=arrow(type="open")
+                       ) +
+            scale_x_continuous(breaks=seq(1999,2019,1)) +
+            scale_y_continuous(breaks=seq(20,93,10)
+                              ,limits=c(25,95)
+                              ) +
+            coord_cartesian(xlim=c(2010,2019)) +
+            geom_segment(
+                data=data.frame(
+                    x1=2019-(2/12)
+                    ,x2=2019+(1/12)
+                    ,y1=89.69
+                    ,y2=93.06
+                    )
+                ,aes(
+                    x=x1
+                    ,y=y1
+                    ,xend=x2
+                    ,yend=y2
+                    )
+                ,arrow=arrow(angle=30)
+                ,color="red"
+                ,size=1.4
+                ) +
+            geom_label(
+                data=data.frame(
+                    label = c("Historic Price\n(NSW)","Future Price\n(NSW)")
+                    ,x=c(2013,2017.9)
+                    ,y=c(60,64)
+                    )
+                ,mapping=aes(x=x, y=y, label=label, color=label)
+                ,nudge_x=0.4
+                ) +
+            scale_color_manual(values=c("red","darkorange")) +
+            theme(panel.grid.minor.x=element_blank()
+                 ,panel.grid.minor.y=element_blank()
+                 ,plot.title=element_textbox(margin=margin(t=5,b=5))
+                 ,legend.position="none"
+                 ) +
+            labs(title="Our Future Energy Prices"
+                ,y="Price ($/GwH)"
+                ,x="Year"
+                )
+        ggsave(plot=plot, file="Images/CoverImage.png")
+        return(plot)
+    })
+```
+
+
+# Introduction {#introduction}
+
+
+## Background {#background}
+
+In recent months, media outlets have notified the public about fluctuations in energy prices with headlines such as *Australia's High Electricity Prices the 'New Normal', Report Says* ([Hutchens, 2018](#ref:hutchens_2018)), and *Higher Energy Prices are Here to Stay – Here’s What We Can Do About It* ([Percival, 2018](#ref:percival_2018)) and *'No Likelihood of Relief Ahead': Future Power Prices Continue to Rise* ([Latimer, 2018](#ref:latimer_2018)). These articles create a sense of concern due to the impact to Australian's financial wellbeing. However, there is very little fact in these articles that are grounded in statistical evidence.
+
+While these articles may have lacked academic rigour and rhetoric, the sentiment is still reflected in academic literature. Sardar ([2015](#ref:sardar_2015)) justifies in his 2015 article entitled *Research and Development, Welfare and Efficiency: An Australian Energy Perspective* that increasing numbers of Australians are being driven to welfare as a direct result of Energy Prices. Moreover, in a 2017 article entitled *Australian Energy Policy and Economic Rationalism*, Horan et al. ([2017](#ref:horan_etal_2017)) accuse the Australian Government of having irrational and inefficient energy policy, which is placing increasing and unnecessary financial pressure on Australian households and businesses. Furthermore, Lincoln ([2012](#ref:lincoln_2012)) proposes a succinct set of options for change which may curb this pressure, as articulated in the his article *Options for Change in the Australian Energy Profile*. As shown, the landscape of the Australian Energy Market environment is changing, and this trend may have dire consequences for the future of the Australian economy.
+
+Therefore, with the intent to add some statistical rigour to the discourse around the Australian Energy Prices, this paper aims to model the aggregated monthly Energy Point Price in order to create a prediction of the for the future. The data is extracted from an Australian Government website, visualised, analysed, tested, and then forecast, in order to create such prediction. The resulting prediction will allow citizens to adequately plan for the future, and can also provide advice back to Governmental Agencies in order to advise future policy.
+
+
+## Research Question {#question}
+
+Is the future energy price (monthly mean aggregate) able to be predicted solely using univariate time series data?
+
+
+## Data Source
+
+The data used in this analysis has been obtained from the official website for the Australian Energy Market Operator (AEMO) ([www.aemo.com.au](www.aemo.com.au)). The data obtained from AEMO had the following characteristics and limitations:
+
+1. The raw data was an Energy Point Price, obtained at half hourly increments.
+1. The data was split by State.
+1. The prices for the Australian Capital Territory was included in the prices for New South Whales.
+1. The prices for the Northern Territory were missing from the website.
+1. The prices for Western Australia were in an inconsistent format and inconsistent time-stamp to the rest of the country, and was not able to be merged together.
+1. The website only included data that dated back to 1999.
+
+
+# Data Exploration {#exploration}
+
+Having aggregated the data in to an average monthly price, the AEMO data can be explored to establish its trend, seasonality, stationarity, and regularity. With reference to *[`r figure("AemoMeanPriceByStateByMonth") %>% strsplit(":") %>% unlist() %>% first()`](#fig:AemoMeanPriceByStateByMonth)*, the following conclusions can be drawn:
+
+1. The data does not indicate a seasonal increase and decrease in price; neither by month nor by year.
+1. The data trend indicates a steady increase in price per year, as shown by the fitted linear model line.
+1. At approximately the year $2017$, there appears to be a step increase in prices across all states.
+1. Around the end of $2009$ and the start of $2019$, there appears to be a substantial spike in prices which is consistent across all states.
+1. Each State shows a different level of stability, along with a differing level of price increase. Noting the following differences per state:
+
+    1. $QLD$ appears to have the least steep linear model, as given by the slope of the line being $1.8$, while $VIC$ has the steepest with the slope being $2.4$.
+    1. While $QLD$, $SA$ and $VIC$ appeared to have relatively stable prices between the years $2002$ and $2008$, $NSW$ appeared to have much more unstable prices in the same period.
+    1. The prices for $VIC$ and for $SA$ appear to have the highest average price between the hears of $2017$ and $2019$.
+
+
+[](){#fig:AemoMeanPriceByStateByMonth}
+
+```{r AEMO: Re-Visualise, echo=FALSE, eval=TRUE, results="hide", warning=FALSE, message=FALSE, fig.width=15, fig.height=10}
+# Plot ts() objects ----
+# for (Feature in Features) {
+for (Feature in c("avg_price")) {
+    
+    # for (Time in c("Year","Month","Week")) {
+    for (Time in c("Month")) {
+        
+        paste0("aemo_",Time,"lyTS_",Feature) %>% 
+            get() %>% 
+            (function(x){
+                plot <- x %>% 
+                    autoplot() +
+                    facet_wrap(~series, ncol=1, switch="y") +
+                    geom_smooth(method="lm", size=1) +
+                    geom_text(
+                        data = data.frame(
+                            label = c(replicate(4,"Mean Price"),replicate(4,"Linear Model"))
+                            ,series = replicate(2,paste0("aemo_",Time,"lyTS_",Feature) %>% get() %>% colnames()) %>% as.vector()
+                            ,x=replicate(8,2020)
+                            ,y=c(50,54,105,105,70,70,75,70)
+                        )
+                        ,mapping = aes(x=x, y=y, label=label)
+                        ,nudge_x=0.4
+                    ) +
+                    scale_x_continuous(breaks=seq(1999, 2021)) +
+                    scale_y_continuous(breaks=seq(0, 140, by=20)
+                                      ,limits=c(0,140)
+                                      ) +
+                    stat_regline_equation(label.y=40, label.x=2017) +
+                    theme(legend.position="none"
+                         ,panel.grid.minor.x=element_blank()
+                         ,panel.grid.minor.y=element_blank()
+                         ,plot.margin=unit(c(0.1,3,0.1,3),"mm")
+                         ) +
+                    scale_color_manual(values=c("red","limegreen","blue","orange")) + 
+                    labs(title=Feature %>% str_replace("_", " ") %>% str_replace("avg", "mean") %>% str_replace("rng", "range") %>% str_to_title()
+                        ,subtitle=paste0("By State, By ",Time)
+                        ,y="Price ($/GwH)"
+                        ,caption="Source=\"AEMO\"\nOutlier Data Points Removed"
+                        )
+                
+                ggsave(plot=plot, file="Images/AemoMeanPriceByStateByMonth.png")
+                print(plot)
+                return(plot)
+            })
+    }
+}
+```
+
+*`r figure(name="AemoMeanPriceByStateByMonth", caption="The Temperature Fluctuations over time, by state, by week")`* 
+
+
+In addition to visualising the observed prices, as displayed in *[`r figure("AemoMeanPriceByStateByMonth") %>% strsplit(":") %>% unlist() %>% first()`](#fig:AemoMeanPriceByStateByMonth)*, the time-series data can also be decomposed down to it's relevant attributes. The two most pertinent attributes for time-series is the Trend and the Seasonal attributes. As shown in *[`r figure("AemoDecompositionByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:AemoDecompositionByState)*, the relevant states each have a distance trend and seasonality. The Residual attribute is the residual data, remaining after the data has been decomposed to its Trend and the Seasonal particulars.
+
+This figure has had a smoothed trend line added to the Trend plot. This trend line shows a distinct and prominent upward trend for all states, indicating that this upward trend is likely to continue in to the future, and will increase its price over time.
+
+
+[](){#fig:AemoDecompositionByState}
+
+```{r AEMO: Visualise Decomposition, message=FALSE, warning=FALSE, error=FALSE, echo=FALSE, eval=TRUE, fig.width=15, fig.height=18}
+# Plot decomposition ----
+aemo_MonthlyTS_avg_price %>%
+    (function(x){
+        for (state in colnames(x)) {
+            col <- case_when(state=="NSW" ~ "red"
+                            ,state=="QLD" ~ "limegreen"
+                            ,state=="SA"  ~ "blue"
+                            ,state=="VIC" ~ "orange"
+                            )
+            assign(
+                state,
+                x[,state] %>% 
+                decompose() %>% 
+                (function(x){
+                    cbind("Trend"=x %>% pluck("trend")
+                         ,"Seasonal"=x %>% pluck("seasonal")
+                         ,"Residual"=x %>% pluck("random")
+                         ) %>% 
+                    return()
+                }) %>% 
+                autoplot(.,color=col) + 
+                facet_wrap(~series, ncol=1, scales="free_y", switch="y") +
+                scale_x_continuous(breaks=seq(1999, 2021)) + 
+                geom_smooth(data=function(x){ x %>% filter(series=="Trend") %>% return() }
+                           ,color=col
+                           ,se=FALSE
+                           ) +
+                theme(legend.position="none"
+                     ,panel.grid.minor.x=element_blank()
+                     ,axis.title.x=element_blank()
+                     ,plot.title=element_text(vjust=-7, color=col)
+                     ) + 
+                labs(title=state
+                    ,y=paste0(state," Price ($/Gwh)")
+                    )
+                )
+        }
+        grid.arrange(NSW
+                    ,QLD
+                    ,SA
+                    ,VIC
+                    ,ncol=1
+                    ,bottom=textGrob("Time", hjust=0.5)
+                    ,top=textGrob(expression(bold(underline("Decomposition of Additive Time Series")))
+                                 ,hjust=0.5
+                                 ,gp=gpar(fontsize=20)
+                                 )
+                    ,padding=unit(0.1,"line")
+                    ) %>% 
+        (function(x){
+            ggsave(plot=x, file="Images/AemoDecompositionByState.png")
+        })
+    })
+
+```
+
+*`r figure(name="AemoDecompositionByState", caption="The Decomposition of Additive Time Series, by State, by Month")`*
+
+
+# Testing the Data {#testing}
+
+In order to establish whether the data is suitable for time series analysis and prediction, a number of statistical tests need to be applied to the data. Namely:
+
+1. Test for Whitenoise
+1. Test for Stationarity
+1. (optional) Test for Seasonality
+1. (optional) Test for Regularity
+1. (optional) Test for Stability
+1. Test for Auto-Correlation
+
+
+## Test for Whitenoise {#whitenoise}
+
+The test for Whitenoise is intended to establish whether or not the data is just random points across a period of time. If the data is 'whitenoise' (ie. is random data points), then the data cannot be used for time-series forecasting.
+
+For this, the Box-Ljung Test for Whitenoise ([Ljung & Box, 1978](#ref:ljung_box_1978); [R-Core, nd.](#ref:rcore_nd)) was applied to the AEMO data, with the results displayed in *[`r table("WhitenoiseTestByState") %>% strsplit(":") %>% unlist() %>% first()`](#tab:WhitenoiseTestByState)*. As seen by each of the tests returning a value of less than the threshold ($0.02$), then each of the states are not whitenoise; therefore the data can be used for time-series forecasting
+
+
+[](){#tab:WhitenoiseTestByState}
+
+```{r AEMO: Test TS White Noise, echo=FALSE, eval=TRUE, rows.print=50, cols.print=30, fig.width=10, fig.height=7}
+# Test for Whitenoise ----
+aemo_MonthlyTS_avg_price %>% 
+    (function(x){
+        return <- colnames(x) %>% data.frame("state"=.,"value"=NA)
+        for (state in return[,"state"]) {
+            return[return[,"state"]==state,"value"] <- x[,state] %>% Box.test(lag=24, type="Lj") %>% extract("p.value")
+        }
+        return(return)
+    }) %>% 
+    mutate(threshold=0.02
+          ,outcome=ifelse(value<threshold,"Not Whitenoise","Is Whitenoise")
+          ,value=ifelse(value<0.0000000000000002,"<0.0000000000000002",as.character(value))
+          ,test="Box-Ljung Test"
+          ,feature="Mean Monthly Price"
+          ) %>% 
+    select(feature,state,test,everything()) %>% 
+    rename_all(funs(str_to_title(.))) %>% 
+    kable(align="l") %>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 ) %>% 
+    (function(x){
+        x %>% save_kable("Images/WhitenoiseTestByState.png")
+        x %>% return()
+    })
+```
+
+*`r table(name="WhitenoiseTestByState", caption="Test for Whitenoise for each State")`*
+
+
+## Test for Stationarity {#stationarity}
+
+The test for Stationarity is intended to establish whether or not the data is stationary or not. By declaring that the data is 'stationary' indicates that the data does not vary sufficiently per period. In this instance, the period is by year; thus, the data must vary sufficiently per year so as the time-series forecasting can forecast the values for the proceeding periods. Srivastava ([2015](#ref:srivastava_2015)) provides three effective pictorial examples of non-stationary data, as displayed in *[`r figure("NonStationaryDataChangingMean") %>% strsplit(":") %>% unlist() %>% first()`](#fig:NonStationaryDataChangingMean)* for non-stationary Means, *[`r figure("NonStationaryDataChangingVariance") %>% strsplit(":") %>% unlist() %>% first()`](#fig:NonStationaryDataChangingVariance)* for non-stationary Variance, and *[`r figure("NonStationaryDataChangingCovariance") %>% strsplit(":") %>% unlist() %>% first()`](#fig:NonStationaryDataChangingCovariance)* for non-stationary Covariance.
+
+The KPSS Unit Root Test ([Kwiatkowski et al., 1992](#ref:kwiatkowski_etal_1992); [Pfaff, nd.](#ref:pfaff_nd)) determines if the data is stationary, with a p-value less than the threshold ($0.02$) indicating that the data is stationary. This test has been applied to the AEMO data set, with the results displayed in *[`r table("StationarityTestByState") %>% strsplit(":") %>% unlist() %>% first()`](#tab:StationarityTestByState)*. The results of this test shows that the data sets are not stationary, and can be used for time-series forecasting.
+
+
+[](){#tab:StationarityTestByState}
+
+```{r AEMO: Test TS Stationarity, echo=FALSE, eval=TRUE, rows.print=50, cols.print=30, fig.width=10, fig.height=7}
+# Test for Stationarity ----
+aemo_MonthlyTS_avg_price %>% 
+    (function(x){
+        return <- colnames(x) %>% data.frame("state"=.,"value"=NA)
+        for (state in return[,"state"]) {
+            return[return[,"state"]==state,"value"] <- (x[,state] %>% ur.kpss(use.lag=24))@teststat
+        }
+        return(return)
+    }) %>% 
+    mutate(test="KPSS Unit Root Test"
+          ,threshold=0.02
+          ,feature="Mean Monthly Price"
+          ,outcome=ifelse(value<threshold,"Is Stationary","Not Stationary")
+          ) %>% 
+    select(feature,state,test,everything()) %>% 
+    rename_all(funs(str_to_title(.))) %>% 
+    kable(align="l")%>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 ) %>% 
+    (function(x){
+        x %>% save_kable("Images/StationarityTestByState.png")
+        x %>% return()
+    })
+```
+
+*`r table(name="StationarityTestByState", caption="Test for Stationarity for each State")`*
+
+
+<div class="row">
+
+<div class="column" style="height:250px">
+
+![](https://www.analyticsvidhya.com/wp-content/uploads/2015/02/Mean_nonstationary.png){#fig:NonStationaryDataChangingMean}
+
+*`r figure(name="NonStationaryDataChangingMean", caption="Non-Stationary Data with Changing Mean ([Srivastava, 2015](#ref:srivastava_2015))")`*
+
+</div>
+
+<div class="column" style="height:250px">
+
+![](https://www.analyticsvidhya.com/wp-content/uploads/2015/02/Var_nonstationary.png){#fig:NonStationaryDataChangingVariance}
+
+*`r figure(name="NonStationaryDataChangingVariance", caption="Non-Stationary Data with Changing Variance ([Srivastava, 2015](#ref:srivastava_2015))")`*
+
+</div>
+
+</div>
+
+<div class="row" align="center">
+
+<center>
+
+<div class="column" style="width:50%">
+
+![](https://www.analyticsvidhya.com/wp-content/uploads/2015/02/Cov_nonstationary.png){#fig:NonStationaryDataChangingCovariance}
+
+*`r figure(name="NonStationaryDataChangingCovariance", caption="Non-Stationary Data with Changing Covariance ([Srivastava, 2015](#ref:srivastava_2015))")`*
+
+</div>
+
+</center>
+
+</div>
+
+
+## Test for Seasonality {#sasonality}
+
+The test for Seasonality is not a necessary test before doing a time-series forecasting. However, it is beneficial to understand to what extent does the data vary or remain consistent throughout each period of analysis. By declaring that the data is 'seasonal' is to say that the peaks and troughs are the same for each of the periods, and that the future seasonal periods could be predicted with a reasonable level of confidence.
+
+For this, there are two seasonality tests that can be applied to the AEMO data, the first being the QS test ([Ollech, 2019](#ref:ollech_2019); [Sax, nd.](#ref:sax_nd)), and the second is the Seasonal Strength test ([Yang & Hyndman, 2019](#ref:yang_hyndman_2019); [Hyndman, nd.(a)](#ref:hyndman_nda)). The QS test will to determine its level of seasonality, while the Seasonal Strength test will determine the strength of the seasonality. The results of these tests are displayed in *[`r table("SeasonalityTestByState") %>% strsplit(":") %>% unlist() %>% first()`](#tab:SeasonalityTestByState)*. The threshold p-value are $0.02$, indicating that if a value is below this threshold, then it is seasonal; but if it is above this threshold, then it is not seasonal. As shown, the data in $SA$ is seasonal, while the other states are not seasonal. This information can be used to control the hyper-parameters in the ARIMA forecasting model.
+
+
+[](){#tab:SeasonalityTestByState}
+
+```{r AEMO: Test TS Seasonality Table, echo=FALSE, eval=TRUE, rows.print=50, cols.print=30, fig.width=10, fig.height=7}
+# Test for Seasonality ----
+aemo_MonthlyTS_avg_price %>% 
+    (function(x){
+        return1 <- colnames(x) %>% data.frame("state"=.,"value"=NA,"test"="QS Test")
+        return2 <- colnames(x) %>% data.frame("state"=.,"value"=NA,"test"="Seasonal Strength Test")
+        for (state in return1[,"state"]) {
+            return1[return1[,"state"]==state,"value"] <- x[,state] %>% qs(freq=12) %>% pluck("Pval")
+            return2[return2[,"state"]==state,"value"] <- x[,state] %>% stl_features() %>% pluck("seasonal_strength")
+        }
+        return(rbind(return1,return2))
+    }) %>% 
+    mutate(threshold=0.02
+          ,feature="Mean Monthly Price"
+          ,outcome=case_when(test=="QS Test" & value<threshold ~ "Is Seasonal"
+                            ,test=="QS Test" & value>threshold ~ "Not Seasonal"
+                            ,test=="Seasonal Strength Test" & value<threshold ~ "Strong Seasonality"
+                            ,test=="Seasonal Strength Test" & value>threshold ~ "Weak Seasonality"
+                            )
+          ) %>% 
+    select(feature,state,test,everything()) %>% 
+    rename_all(funs(str_to_title(.))) %>% 
+    kable(align="l") %>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 ) %>% 
+    (function(x){
+        x %>% save_kable("Images/SeasonalityTestByState.png")
+        x %>% return()
+    })
+```
+
+*`r table(name="SeasonalityTestByState", caption="Test for Seasonality for each State")`*
+
+
+In addition to the formal tests for Seasonality, the seasonality of the data can also be visualised. As shown by the 'Seasonal' plots within *[`r figure("AemoDecompositionByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:AemoDecompositionByState)* (and plotted again in *[`r figure("SeasonalityTestByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:SeasonalityTestByState)*), the data for all four states can be seen as having a semi-seasonal trend. This is because there is no smooth undulation between the seasons; only sharp sporadic spikes throughout each period.
+
+
+[](){#fig:SeasonalityPlotByState}
+
+```{r AEMO: Plot Seasonality, message=FALSE, warning=FALSE, echo=FALSE, eval=TRUE, fig.width=15, fig.height=8}
+# Plot Seasonality ----
+aemo_MonthlyTS_avg_price %>%
+    (function(x){
+        for (state in colnames(x)) {
+            col <- case_when(state=="NSW" ~ "red"
+                            ,state=="QLD" ~ "limegreen"
+                            ,state=="SA"  ~ "blue"
+                            ,state=="VIC" ~ "orange"
+                            )
+            assign(state
+                  ,x[,state] %>% 
+                      decompose() %>% 
+                      pluck("seasonal") %>% 
+                      autoplot(.,color=col) + 
+                      scale_x_continuous(breaks=seq(1999, 2021)) + 
+                      theme(legend.position="none"
+                           ,panel.grid.minor.x=element_blank()
+                           ,axis.title.x=element_blank()
+                           ,plot.title=element_text(color=col)
+                           ) + 
+                      labs(title=state
+                          ,y=paste0(state," Price ($/Gwh)")
+                          ,x="Year"
+                          )
+                  ,envir=globalenv()
+                )
+            }
+        grid.arrange(NSW
+                    ,QLD
+                    ,SA
+                    ,VIC
+                    ,ncol=1
+                    ,bottom=textGrob("Time", hjust=0.5)
+                    ,top=textGrob(expression(bold(underline("Seasonality of Time Series")))
+                                 ,hjust=0.5
+                                 ,gp=gpar(fontsize=20)
+                                 )
+                    ,padding=unit(0.1,"line")
+                    ) %>% 
+            (function(x){
+                ggsave(plot=x, file="Images/SeasonalityPlotByState.png")
+            })
+    })
+```
+
+*`r figure(name="SeasonalityPlotByState", caption="Seasonality Plot for each State")`*
+
+
+## Test for Regularity {#regularity}
+
+Like with testing for Seasonality, it is not necessary to test for Regularity in order to produce a time-series forecast. However, it is beneficial to do as it provides information about the attributes for the data. To state that the data is 'regular' is to say that the data point are evenly spaced, regularly collected, and not missing data points (ie. do not contain excessive `NA` values). Logically, it is not always necessary to conduct the Test for Regularity on automatically collected data (like for example with Energy Prices, or Daily Temperature), however if this data was collected manually then it is highly recommended. If the data does not meet the requirements of Regularity, then it is necessary to return to the data collection plan, and revise the methodology used.
+
+For the AEMO data, the Is Regular ([Zeileis & Grothendieck nd.](#ref:zeileis_grothendieck_nd); [Zeileis nd.](#ref:zeileis_nd)) test was conducted, with the resulting outcome reported in *[`r table("RegularityTestByState") %>% strsplit(":") %>% unlist() %>% first()`](#tab:RegularityTestByState)*. As shown, all of the states meet the requirements for regular data points, and thus can be used for time-series forecasting.
+
+
+[](){#tab:RegularityTestByState}
+
+```{r AEMO: Test TS Regularity, echo=FALSE, eval=TRUE, rows.print=50, cols.print=30, fig.width=10, fig.height=7}
+# Test for Regularity ----
+aemo_MonthlyTS_avg_price %>% 
+    (function(x){
+        return <- colnames(x) %>% data.frame("state"=.,"value"=NA)
+        for (state in return[,"state"]) {
+            return[return[,"state"]==state,"value"] <- x[,state] %>% is.regular()
+        }
+        return(return)
+    }) %>% 
+    mutate(test="Is Regular"
+          ,feature="Mean Monthly Price"
+          ,outcome=ifelse(value==TRUE,"Is Regular","Not Regular")
+          ) %>% 
+    select(feature,state,test,everything()) %>% 
+    rename_all(funs(str_to_title(.))) %>% 
+    kable(align="l") %>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 ) %>% 
+    (function(x){
+        x %>% save_kable("Images/RegularityTestByState.png")
+        x %>% return()
+    })
+```
+
+*`r table(name="RegularityTestByState", caption="Test for Regularity for each State")`*
+
+
+## Test for Stability {#stability}
+
+Like with the Test for Seasonality and the Test for Regularity, the test for Stability is not a necessary test in order to perform time-series forecasting. It is, however, quite beneficial as a measure of how much the data varies over each period of time. If a data-set is to be 'stable', that means that the means of each time period do not vary dramatically over time. In other words, the higher the variance between the means of each time-period, the more unstable the data is.
+
+For the AEMO data, there are two tests which can be used: the Test for Stability ([Yang & Hyndman, 2019](#ref:yang_hyndman_2019); [Hyndman, nd.(a)](#ref:hyndman_nda)) and the Test for Lumpiness ([Yang & Hyndman, 2019](#ref:yang_hyndman_2019); [Hyndman, nd.(a)](#ref:hyndman_nda)). While the Stability test measures the variance of the means, the Lumpiness test measures the variance of the variances. For both of these measures, they simply indicate the extent to which each series varies by. The limits for this test are $0$ and $1$, whereby, a score of $0$ would indicate a perfectly stable (or perfectly smooth) data set, while a score of $1$ would indicate a completely unstable (or completely sporadic) data set. As displayed in *[`r table("StabilityTestByState") %>% strsplit(":") %>% unlist() %>% first()`](#tab:StabilityTestByState)*, the measures for $NSW$ and $VIC$ are somewhat stable, while the other states are not. Noting that the measures are very close to the threshold. However, all four states are recordedly not lumpy.
+
+
+[](){#tab:StabilityTestByState}
+
+```{r AEMO: Test TS Stability, echo=FALSE, eval=TRUE, rows.print=50, cols.print=30, fig.width=10, fig.height=7}
+# Test for Stability ----
+aemo_MonthlyTS_avg_price %>% 
+    (function(x){
+        return1 <- colnames(x) %>% data.frame("state"=.,"value"=NA,"test"="Stability Test")
+        return2 <- colnames(x) %>% data.frame("state"=.,"value"=NA,"test"="Lumpiness Test")
+        for (state in return1[,"state"]) {
+            return1[return1[,"state"]==state,"value"] <- x[,state] %>% stability(width=12)
+            return2[return2[,"state"]==state,"value"] <- x[,state] %>% lumpiness(width=12)
+        }
+        return(rbind(return1,return2))
+    }) %>% 
+    mutate(threshold=0.5
+          ,feature="Mean Monthly Price"
+          ,outcome=case_when(test=="Stability Test" & value>threshold ~ "Is Stable"
+                            ,test=="Stability Test" & value<threshold ~ "Not Stable"
+                            ,test=="Lumpiness Test" & value>threshold ~ "Is Lumpy"
+                            ,test=="Lumpiness Test" & value<threshold ~ "Not Lumpy"
+                            )
+          ) %>% 
+    select(feature,state,test,everything()) %>% 
+    rename_all(funs(str_to_title(.))) %>% 
+    kable(align="l") %>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 ) %>% 
+    (function(x){
+        x %>% save_kable("Images/StabilityTestByState.png")
+        x %>% return()
+    })
+```
+
+*`r table(name="StabilityTestByState", caption="Test for Stability for each State")`*
+
+
+## Test for Auto-Correlation {#correlation}
+
+An important test to do on Time-Series data is to measure it's level of Auto-Correlation ([McMurry & Politis, 2010](#ref:mcmurry_politis_2010); [Hyndman, nd.(b)](#ref:hyndman_ndb)). While 'correlation' refers to how two variables change based on the other's value, 'auto-correlation' is how a variable changes based on it's own value over time (the phrase "auto" refers to "self"). For the Auto-Correlation Function, it uses a '$lag$' function. For example, a lag value of $0$ is $100\%$ correlated, which is logical, because that is it's own value; whereas a lag value of $1$ or greater, the level of auto-correlation decreases as it get's further away from $lag_0$.
+
+For well-structured time-series data sets, it would be expected to see a conical-shaped Auto-Correlation plot. If it were not a well-structured time-series data set, then this Auto-Correlation plot would look more like white noise, and there would not be any logical shape. The blue dotted lines are included as a reference point for determining if any of the observations are significantly different from zero.
+
+Moreover, analysis of the data's Auto-Correlation (ACF) should be combined with analysis of its Partial Auto-Correlation (PACF). While the ACF is the "direct" relationship between an observation and it's relevant lag observation, the PACF removes the "indirect" relationship between these observations. Effectively, the Partial Auto-Correlation between $lag_1$ and $lag_5$ is the "actual" correlation between these two observations, after removing the influence that $lag_2$, $lag_3$, and $lag_4$ has on $lag_5$.
+
+What this means is that the Partial Auto-Correlation plot would have a very high value at $lag_0$, which will drop very quickly at $lag_1$, and should remain below the blue reference lines for the remainder of the Correlogram. The observations of $lag_{>0}$ should resemble white noise data points. If it does not resemble white noise, and there is a distinct pattern occurring, then the data is not suitable for time-series forecasting.
+
+When applied to the AEMO data, as displayed in *[`r figure("AutoCorrelationFunctionByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:AutoCorrelationFunctionByState)*, the following conclusions can be drawn:
+
+1. (ACF) All four states are suitable for use in time-series forecasting due to their conical shape;
+1. (PACF) The data is relatively stable, due to the fact that the vast majority of the data points are falling within the blue limit lines.
+1. (ACF) There is a slight increase in correlation between $lag_{50}$ and $lag_{70}$, which is congruent with the trend pattern increase in price between 2013 and 2015 (*[`r figure("AemoDecompositionByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:AemoDecompositionByState)*).
+1. (PACF) All four states are suitable for use in time-series forecasting due to:
+
+    1. Their rapid drop between $lag_0$ and $lag_1$;
+    1. Their constant, random pattern in $lag_{>0}$; and
+
+
+[](){#fig:AutoCorrelationFunctionByState}
+
+```{r AEMO: Test Auto-Correlation, echo=FALSE, eval=TRUE, message=FALSE, warning=FALSE, fig.width=15, fig.height=10}
+# Set ACF ----
+aemo_MonthlyACF_avg_price <- aemo_MonthlyTSDF_avg_price %>% 
+    gather("state","temp") %>% 
+    group_by(state) %>% 
+    summarise(list_acf=list(acf(temp, lag.max=108, plot=FALSE))) %>%
+    mutate(acf_vals=purrr::map(list_acf, ~as.numeric(.x$acf))) %>% 
+    select(-list_acf) %>% 
+    unnest() %>%
+    group_by(state) %>% 
+    mutate(lag=row_number() - 1) %>% 
+    ungroup() %>% 
+    mutate(state=paste(state,"(Auto-Correlation)")) %>% 
+    ggplot(aes(x=lag, y=acf_vals, color=state)) +
+    geom_bar(stat="identity", width=.05) +
+    facet_wrap(~state, ncol=1, switch="y") +
+    scale_color_manual(values=c("red","limegreen","blue","orange")) + 
+    geom_hline(yintercept = 0) +
+    geom_hline(data = . %>% group_by(state) %>% summarise(ci = qnorm((1+0.95)/2)/sqrt(n()))
+               ,aes(yintercept = -ci)
+               ,color="blue"
+               ,linetype="dashed"
+               ) +
+    geom_hline(data = . %>% group_by(state) %>% summarise(ci = qnorm((1+0.95)/2)/sqrt(n()))
+               ,aes(yintercept = ci)
+               ,color="blue"
+               ,linetype="dashed"
+               ) +
+    scale_x_continuous(breaks=seq(0,110,by=20)) +
+    theme(legend.position="none"
+          ,panel.grid.minor.x=element_blank()
+          ,panel.grid.minor.y=element_blank()
+          ) +
+    labs(x="Lag (108 periods)"
+         ,y="Level of Correlation (limits: -1 & 1)"
+         )
+
+
+# Set PACF ----
+aemo_MonthlyPACF_avg_price <- aemo_MonthlyTSDF_avg_price %>% 
+    gather("state","temp") %>% 
+    group_by(state) %>% 
+    summarise(list_acf=list(pacf(temp, lag.max=108, plot=FALSE))) %>%
+    mutate(acf_vals=purrr::map(list_acf, ~as.numeric(.x$acf))) %>% 
+    select(-list_acf) %>% 
+    unnest() %>%
+    group_by(state) %>% 
+    mutate(lag=row_number() - 1) %>% 
+    ungroup() %>% 
+    mutate(state=paste(state,"(Partial Auto-Correlation)")) %>% 
+    ggplot(aes(x=lag, y=acf_vals, color=state)) +
+    geom_bar(stat="identity", width=.05) +
+    facet_wrap(~state, ncol=1, switch="y") +
+    scale_color_manual(values=c("red","limegreen","blue","orange")) + 
+    geom_hline(yintercept = 0) +
+    geom_hline(data = . %>% group_by(state) %>% summarise(ci = qnorm((1+0.95)/2)/sqrt(n()))
+               ,aes(yintercept = -ci)
+               ,color="blue"
+               ,linetype="dashed"
+               ) +
+    geom_hline(data = . %>% group_by(state) %>% summarise(ci = qnorm((1+0.95)/2)/sqrt(n()))
+               ,aes(yintercept = ci)
+               ,color="blue"
+               ,linetype="dashed"
+               ) +
+    scale_x_continuous(breaks=seq(0,110,by=20)) +
+    theme(legend.position="none"
+          ,panel.grid.minor.x=element_blank()
+          ,panel.grid.minor.y=element_blank()
+          ) +
+    labs(x="Lag (108 periods)"
+         ,y="Level of Correlation (limits: -1 & 1)"
+         )
+
+
+# Display ----
+grid.arrange(aemo_MonthlyACF_avg_price
+    ,aemo_MonthlyPACF_avg_price
+    ,ncol=2
+    ,top=textGrob(expression(bold(underline("Auto-Correlation Function for Mean Price")))
+                  ,hjust=0.5
+                  ,gp=gpar(fontsize=20)
+                  )
+    ) %>% 
+    (function(x){
+        ggsave(plot=x, file="Images/AutoCorrelationFunctionByState.png")
+    })
+```
+
+*`r figure(name="AutoCorrelationFunctionByState", caption="Auto-Correlation Functions for each State")`*
+
+
+# Forecast {#forecast}
+
+## Context {#context}
+
+The result of having applied this testing then allows the data to be forecast forward to create a prediction for the future. The chosen prediction model for this forecast is the ARIMA model. 'ARIMA' is an acronym for 'Auto-Regressive Integrated Moving Average' ([Kang, 2017](#ref:kang_2017)), and is broken in to three parts in order to make the model fit the data as well as possible:
+
+1. **Auto Regressive**: Indicating level to which an evolving variable (*predictor*) is regressed (*predicted*) based on it's own lagged (*previous*) observed values.
+1. **Integrated**: Indicating the level of *differencing* to be applied to the data between the observed value (*predictor*) and an observed value in the previous time step (*previous*). Effectively, by doing this subtraction allows the properties of the time-series data to not depend on the time of the observation, thus eliminating trend and seasonality, and then also stabilises the mean of the time series.
+1. **Moving Average**: Indicating the level of dependency between an observed value (*predictor*) and the residual error from a moving average model applied to it's own lagged (*previous*) observed values.
+
+
+## Prediction {#prediction}
+
+This ARIMA model thus being applied to the AEMO data produces a prediction as recorded in *[`r figure("ForecastPlotByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:ForecastPlotByState)*. This figure has the following features:
+
+1. The coloured line indicates the state.
+1. The darker ribbon is the forecast prediction with an $80\%$ confidence interval.
+1. The lighter ribbon is the forecast prediction with an $90\%$ confidence interval.
+1. The thick black line is the actual observations, for the data has been split in to *Test* and *Train* data sets.
+
+Upon analysis of this forecast, the following predictions can be made:
+
+1. The forecast for $NSW$ and $QLD$ have a ribbon shape, while $SA$ and $VIC$ have a conical shape.
+1. The forecast for $QLD$ and $VIC$ have a relatively stable, flat prediction, while the forecast for $NSW$ and $SA$ have a slightly upward trend.
+1. All four states have a wide level of uncertainty ($\approx\pm\$40\ per\ Gwh$)
+
+
+[](){#fig:ForecastPlotByState}
+
+```{r AEMO: Forecast, echo=FALSE, eval=TRUE, warning=FALSE, message=FALSE, fig.width=15, fig.height=10}
+# Perform Forecast ----
+aemo_MonthlyTS_avg_price %>% 
+    (function(x){
+        
+        # Set up
+        aemo_acc <<- NULL
+        testyears <- 1
+        yearsback <- 20
+
+        for (state in colnames(x)) {
+            
+            x[,state] %>% (function(x){
+            
+                # Sub Set up
+                col <- case_when(
+                    state=="NSW" ~ "red"
+                    ,state=="QLD" ~ "green"
+                    ,state=="SA" ~ "blue"
+                    ,state=="VIC" ~ "orange"
+                    )
+                frequency <- x %>% 
+                    attributes() %>% 
+                    pluck("tsp") %>% 
+                    last()
+                if (frequency %in% c(12,13)) {
+                    forecastperiod <- case_when(
+                        testyears==1 ~ (12*2+5)
+                        ,testyears==2 ~ (12*3+5)
+                        ,testyears==3 ~ (12*4+5)
+                        )
+                } else {
+                    forecastperiod <- case_when(
+                        testyears==1 ~ (52*2 + 10)
+                        ,testyears==2 ~ (52*3 + 10)
+                        ,testyears==3 ~ (52*4 + 10)
+                        )
+                }
+                stationary <- case_when(
+                    state=="NSW" ~ FALSE
+                    ,state=="QLD" ~ FALSE
+                    ,state=="SA" ~ FALSE
+                    ,state=="VIC" ~ FALSE
+                    )
+                seasonal <- case_when(
+                    state=="NSW" ~ TRUE
+                    ,state=="QLD" ~ TRUE
+                    ,state=="SA" ~ TRUE
+                    ,state=="VIC" ~ TRUE
+                    )
+                
+                # Segment
+                if (yearsback>0) {
+                    x %<>% window(start=c(x %>% end() %>% first()-(yearsback+testyears)
+                                         ,x %>% end() %>% last()
+                                         ))
+                } 
+                aemo_trn <- x %>% 
+                    window(end=c(x %>% end() %>% first()-testyears
+                                ,x %>% end() %>% last()
+                                ))
+                aemo_tst <- x %>% 
+                    window(start=c(x %>% end() %>% first()-testyears
+                                  ,x %>% end() %>% last()
+                                  ))
+                
+                # Fit
+                aemo_fit <- aemo_trn %>% auto.arima(max.p=20
+                                                   ,max.q=20
+                                                   ,stationary=stationary
+                                                   ,seasonal=seasonal
+                                                   ,ic="aicc"
+                                                   ,stepwise=FALSE
+                                                   )
+                
+                # Forecast
+                aemo_fcs <- aemo_fit %>% forecast(h=length(aemo_tst))
+                
+                # Test
+                aemo_acc <<- accuracy(aemo_fcs, aemo_tst) %>% 
+                    data.frame() %>% 
+                    select("RMSE","MAE","MAPE","MASE") %>% 
+                    rownames_to_column("SetType") %>% 
+                    filter(SetType=="Test set") %>% 
+                    select(-SetType) %>% 
+                    mutate(State=state) %>% 
+                    select(State,everything()) %>% 
+                    rbind(aemo_acc,.)
+                
+                # Plot
+                assign(paste0("aemo_FcsPlt_",state)
+                      ,x %>%
+                          autoplot(color=paste0("dark",col)) +
+                          autolayer(aemo_fit %>% forecast(h=forecastperiod), PI=TRUE, series="Forecast", color=col, size=1) +
+                          autolayer(aemo_tst, color="black", size=1) +
+                          scale_x_continuous(breaks=seq(1999,2021)) +
+                          scale_y_continuous(breaks=seq(0,180,40)
+                                            ,limits=c(0,180)
+                                            ) +
+                          theme(axis.title.x=element_blank()
+                               ,plot.title=element_text(vjust=-6, color=paste0("dark",col))
+                               ,panel.grid.minor.x=element_blank()
+                               ,plot.margin=unit(c(0.1,3,0.1,3),"mm")
+                               ) +
+                          labs(title=state
+                              ,y=paste(state,"Price ($/GwH)")
+                              ,caption=aemo_acc %>% filter(State==state) %>% select("RMSE") %>% pull() %>% round(2) %>% paste0("Scored RMSE=",.)
+                              )
+                      ,envir=globalenv()
+                      )
+                
+            })
+            
+        }
+        
+        # Return
+        grid.arrange(
+            aemo_FcsPlt_NSW
+            ,aemo_FcsPlt_QLD
+            ,aemo_FcsPlt_SA
+            ,aemo_FcsPlt_VIC
+            ,ncol=1
+            ,bottom=textGrob("Time", hjust=0.5)
+            ,top=textGrob(expression(bold(underline("Forecast by State")))
+                          ,hjust=0.5
+                          ,gp=gpar(fontsize=20)
+                          )
+            ,padding=unit(0.1,"line")
+            ) %>% 
+            (function(x){
+                ggsave(plot=x, file="Images/ForecastPlotByState.png")
+            })
+    
+    })
+```
+
+*`r figure(name="ForecastPlotByState", caption="Plot of Forecast for each State, Including Actual Temperature")`*
+
+
+## Accuracy {#accuracy}
+
+Using the data in the *Test*/*Train* split, the level of accuracy for the prediction can be calculated.
+
+There are four measurement scores shown in *[`r table("ForecastScoreByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:ForecastScoreByState)*, being:
+
+1. Root Mean Square Error (RMSE),
+1. Mean Average Error (MAE),
+1. Mean Absolute Percentage Error (MAPE), and
+1. Mean Absolute Scaled Error (MASE).
+
+The chosen metric for this analysis is the RMSE due to it's ability to punish scores that are further away from the prediction. For RMSE, a lower score is better, as it indicates a lower amount of error. As shown in this table, the NSW Prediction scored best in all four metrics, while VIC scored the worst. This result is in alignment with the actual scores shown in *[`r figure("ForecastPlotByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:ForecastPlotByState)*, because NSW is closest to the prediction while VIC is consistently the furthest away.
+
+
+[](){#tab:ForecastScoreByState}
+
+```{r AEMO: Score, echo=FALSE, eval=TRUE, warning=FALSE, message=FALSE, fig.width=15, fig.height=8}
+# Score ----
+aemo_acc %>% 
+    kable(align="l") %>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 ) %>% 
+    (function(x){
+        x %>% save_kable("Images/ForecastScoreByState.png")
+        x %>% return()
+    })
+```
+
+*`r table(name="ForecastScoreByState", caption="Score of the Forecast for each State")`*
+
+
+## Long-Term Forecast {#longrange}
+
+Using this trained model, the forecast is then projected forward to the year $2026$, as displayed in *[`r figure("LongTermForecastPlotByState") %>% strsplit(":") %>% unlist() %>% first()`](#fig:LongTermForecastPlotByState)*. Analysis of this projected forecast indicates the following:
+
+1. That the long-term energy prices will not be significantly different than the prices seen in the year $2019$.
+1. Due to the sporadic nature of the historic prices, the level of uncertainty of this forecast gets wider in $VIC$ and $SA$; as seen by the conical shape of the forecast.
+1. The shape of the $NSW$ and $QLD$ forecasts are more ribbon-like, indicating less volatility in future prices.
+
+
+[](){#fig:LongTermForecastPlotByState}
+
+```{r AEMO: Long Term Forecast, echo=FALSE, eval=TRUE, warning=FALSE, message=FALSE, fig.width=15, fig.height=10}
+# Perform Forecast ----
+aemo_MonthlyTS_avg_price %>% 
+    (function(x){
+        
+        # Set up
+        yearsforw <- 6
+
+        for (state in colnames(x)) {
+            
+            x[,state] %>% (function(x){
+            
+                # Sub Set up
+                col <- case_when(
+                    state=="NSW" ~ "red"
+                    ,state=="QLD" ~ "green"
+                    ,state=="SA" ~ "blue"
+                    ,state=="VIC" ~ "orange"
+                    )
+                frequency <- x %>% 
+                    attributes() %>% 
+                    pluck("tsp") %>% 
+                    last()
+                if (frequency %in% c(12)) {
+                    forecastperiod <- yearsforw * frequency
+                } else if (frequency %in% c(52)) {
+                    forecastperiod <- yearsforw * frequency
+                }
+                stationary <- case_when(
+                    state=="NSW" ~ FALSE
+                    ,state=="QLD" ~ FALSE
+                    ,state=="SA" ~ FALSE
+                    ,state=="VIC" ~ FALSE
+                    )
+                seasonal <- case_when(
+                    state=="NSW" ~ TRUE
+                    ,state=="QLD" ~ TRUE
+                    ,state=="SA" ~ TRUE
+                    ,state=="VIC" ~ TRUE
+                    )
+                
+                # Segment
+                aemo_trend <- x %>% 
+                    decompose() %>% 
+                    pluck("trend")
+                
+                # Fit
+                aemo_fit <- x %>% auto.arima(max.p=20
+                                            ,max.q=20
+                                            ,stationary=stationary
+                                            ,seasonal=seasonal
+                                            ,ic="aicc"
+                                            ,stepwise=FALSE
+                                            )
+                
+                # Forecast
+                aemo_fcs <- aemo_fit %>% forecast(h=forecastperiod)
+                
+                # Plot
+                assign(state
+                      ,x %>%
+                          autoplot(color=paste0("dark",col)) +
+                          autolayer(aemo_fcs, PI=TRUE, series="Forecast", color=col, size=1) +
+                          scale_x_continuous(breaks=seq(1999,2026)) +
+                          scale_y_continuous(breaks=seq(-40,200,40)
+                                            # ,limits=c(-20,200)
+                                            ) +
+                          coord_cartesian(ylim=c(0,160)) +
+                          theme(axis.title.x=element_blank()
+                               ,plot.title=element_text(vjust=-6, color=paste0("dark",col))
+                               ,panel.grid.minor.x=element_blank()
+                               ,plot.margin=unit(c(0.1,3,0.1,3),"mm")
+                               ) +
+                          labs(title=state
+                              ,y=paste(state,"Price ($/GwH)")
+                              )
+                      ,envir=globalenv()
+                      )
+                
+            })
+            
+        }
+        
+        # Return
+        grid.arrange(NSW
+                    ,QLD
+                    ,SA
+                    ,VIC
+                    ,ncol=1
+                    ,bottom=textGrob("Time", hjust=0.5)
+                    ,top=textGrob(expression(bold(underline("Long-Term Forecast by State")))
+                                 ,hjust=0.5
+                                 ,gp=gpar(fontsize=20)
+                                 )
+                    ,padding=unit(0.1,"line")
+                    ) %>% 
+            (function(x){
+                ggsave(plot=x, file="Images/LongTermForecastPlotByState.png")
+            })
+    
+    })
+```
+
+*`r figure(name="LongTermForecastPlotByState", caption="Score of the Forecast for each State")`*
+
+
+<!-- !NOTE! This next bit is the analysis done for the BOM data. -->
+<!-- It wasn't included in the original analysis, but is a good comparison for highly seasonal data on the same period as the AEMO data. -->
+<!-- BEGIN hidden section
+
+```{r BOM: Set Up, echo=FALSE, eval=FALSE, results="hide", warning=FALSE, rows.print=50, cols.print=30, fig.width=10, fig.height=5}
+# Master ----
+bom_Master <- expand.grid( date = seq.Date(dmy("1/1/09"),dmy("31/12/19"),"day")
+                         , station_id = bom_WeatherStations[,"station_id"]
+                         ) %>% 
+    mutate(join = paste0(station_id, "_", str_replace_all(date,"-","_"))) %>% 
+    select(join) %>% 
+    left_join(bom_DailyMinTemp,"join") %>% 
+    left_join(bom_DailyMaxTemp %>% select(join,max_temp), "join") %>% 
+    left_join(bom_DailyRainfall %>% select(join,rainfall_mils), "join") %>% 
+    left_join(bom_DailySolarExposure %>% select(join, solar_exposure), "join") %>% 
+    left_join(bom_WeatherStations %>% select(station_id, state), "station_id") %>% 
+    filter(!is.na(station_id)) %>% 
+    mutate(week_id = paste0(date %>% ymd %>% year %>% as.character
+                           ,date %>% ymd %>% week %>% str_pad(width=2,pad="0")
+                           )
+          ,year_id = date %>% year
+          ,avg_temp = rowMeans(.[,c("min_temp","max_temp")],na.rm=T)
+          ,rng_temp = max_temp-min_temp
+          ) %>% 
+    select(station_id,state,date,year_id,month_id,week_id,contains("temp"),contains("rain"),contains("solar"))
+
+
+# Yearly ----
+bom_Yearly <- bom_Master %>% 
+    group_by(state,year_id) %>% 
+    summarise(min_temp = min(min_temp, na.rm=T)
+             ,max_temp = max(max_temp, na.rm=T)
+             ,rng_temp = diff(c(min(min_temp, na.rm=T),max(max_temp, na.rm=T)))
+             ,avg_temp = mean(avg_temp, na.rm=T)
+             ,min_rainfall = min(rainfall_mils, na.rm=T)
+             ,max_rainfall = max(rainfall_mils, na.rm=T)
+             ,rng_rainfall = diff(range(rainfall_mils, na.rm=T))
+             ,avg_rainfall = mean(rainfall_mils, na.rm=T)
+             ,min_solar = min(solar_exposure, na.rm=T)
+             ,max_solar = max(solar_exposure, na.rm=T)
+             ,rng_solar = diff(range(solar_exposure, na.rm=T))
+             ,avg_solar = mean(solar_exposure, na.rm=T)
+             )%>% 
+    ungroup() %>% 
+    select(state,year_id,contains("temp"),contains("rainfall"),contains("solar")) %>% 
+    mutate_all(~replace(., is.infinite(.), 0)
+              ,~replace(., is.finite(.), 0)
+              )
+
+
+# Monthly ----
+bom_Monthly <- bom_Master %>% 
+    group_by(state,month_id) %>% 
+    summarise(min_temp = min(min_temp, na.rm=T)
+             ,max_temp = max(max_temp, na.rm=T)
+             ,rng_temp = diff(c(min(min_temp, na.rm=T),max(max_temp, na.rm=T)))
+             ,avg_temp = mean(avg_temp, na.rm=T)
+             ,min_rainfall = min(rainfall_mils, na.rm=T)
+             ,max_rainfall = max(rainfall_mils, na.rm=T)
+             ,rng_rainfall = diff(range(rainfall_mils, na.rm=T))
+             ,avg_rainfall = mean(rainfall_mils, na.rm=T)
+             ,min_solar = min(solar_exposure, na.rm=T)
+             ,max_solar = max(solar_exposure, na.rm=T)
+             ,rng_solar = diff(range(solar_exposure, na.rm=T))
+             ,avg_solar = mean(solar_exposure, na.rm=T)
+             )%>% 
+    ungroup() %>% 
+    select(state,month_id,contains("temp"),contains("rainfall"),contains("solar")) %>% 
+    mutate_all(~replace(., is.infinite(.), 0)
+              ,~replace(., is.finite(.), 0)
+              )
+
+
+# Weekly ----
+bom_Weekly <- bom_Master %>% 
+    group_by(state,week_id) %>% 
+    summarise(min_temp = min(min_temp, na.rm=T)
+             ,max_temp = max(max_temp, na.rm=T)
+             ,rng_temp = diff(c(min(min_temp, na.rm=T),max(max_temp, na.rm=T)))
+             ,avg_temp = mean(avg_temp, na.rm=T)
+             ,min_rainfall = min(rainfall_mils, na.rm=T)
+             ,max_rainfall = max(rainfall_mils, na.rm=T)
+             ,rng_rainfall = diff(range(rainfall_mils, na.rm=T))
+             ,avg_rainfall = mean(rainfall_mils, na.rm=T)
+             ,min_solar = min(solar_exposure, na.rm=T)
+             ,max_solar = max(solar_exposure, na.rm=T)
+             ,rng_solar = diff(range(solar_exposure, na.rm=T))
+             ,avg_solar = mean(solar_exposure, na.rm=T)
+             )%>% 
+    ungroup() %>% 
+    select(state,week_id,contains("temp"),contains("rainfall"),contains("solar")) %>% 
+    mutate_all(~replace(., is.infinite(.), 0)
+              ,~replace(., is.finite(.), 0)
+              )
+
+
+# TSDF's ----
+
+# Decide Features
+# Features <- c("avg_temp")
+Features <- c("avg_temp","rng_temp")
+# Features <- c("avg_temp","rng_temp","rng_rainfall","avg_rainfall","rng_solar","avg_solar")
+
+for (Feature in Features) {
+    
+    # Yearly ----
+    assign(paste("bom_YearlyTSDF",Feature,sep="_")
+          ,bom_Yearly %>%
+              filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+              select(state,Feature,year_id) %>% 
+              (function(x) {
+                  states <- x %>% 
+                      select(state) %>% 
+                      distinct() %>% 
+                      pull()
+                  df_return <- x %>% 
+                      select(year_id) %>% 
+                      distinct()
+                  for (str_state in states) {
+                      df_return <- x %>% 
+                          filter(state==str_state) %>% 
+                          rename_at(vars(starts_with("avg")), funs(paste0(str_state))) %>% 
+                          rename_at(vars(starts_with("rng")), funs(paste0(str_state))) %>% 
+                          select(-state) %>% 
+                          left_join(x=df_return, y=., by="year_id")
+                      }
+                  return(df_return)
+                  }) %>% 
+              arrange(year_id) %>% 
+              select(-year_id)
+          )
+    
+    
+    # Monthly ----
+    assign(paste("bom_MonthlyTSDF",Feature,sep="_")
+          ,bom_Monthly %>% 
+              filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+              select(state,Feature,month_id) %>% 
+              (function(x) {
+                  states <- x %>% 
+                      select(state) %>% 
+                      distinct() %>% 
+                      pull()
+                  df_return <- x %>% 
+                      select(month_id) %>% 
+                      distinct()
+                  for (str_state in states) {
+                      df_return <- x %>% 
+                          filter(state==str_state) %>% 
+                          rename_at(vars(starts_with("avg")), funs(paste0(str_state))) %>%
+                          rename_at(vars(starts_with("rng")), funs(paste0(str_state))) %>%
+                          select(-state) %>% 
+                          left_join(x=df_return, y=., by="month_id")
+                      }
+                  return(df_return)
+                  }) %>% 
+              arrange(month_id) %>% 
+              select(-month_id)
+          )
+    
+    
+    # Weekly ----
+    assign(paste("bom_WeeklyTSDF",Feature,sep="_")
+          ,bom_Weekly %>%
+              filter(state %in% c("NSW","VIC","QLD","SA")) %>% 
+              select(state,Feature,week_id) %>% 
+              (function(x) {
+                  states <- x %>% 
+                      select(state) %>% 
+                      distinct() %>% 
+                      pull()
+                  df_return <- x %>% 
+                      select(week_id) %>% 
+                      distinct()
+                  for (str_state in states) {
+                      df_return <- x %>% 
+                          filter(state==str_state) %>% 
+                          rename_at(vars(starts_with("avg")), funs(paste0(str_state))) %>% 
+                          rename_at(vars(starts_with("rng")), funs(paste0(str_state))) %>% 
+                          select(-state) %>% 
+                          left_join(x=df_return, y=., by="week_id")
+                      }
+                  return(df_return)
+                  }) %>% 
+              arrange(week_id) %>% 
+              select(-week_id)
+          )
+    
+}
+
+
+# TS's ----
+for (Feature in Features) {
+    
+    # Yearly ----
+    assign(paste("bom_YearlyTS",Feature,sep="_")
+          ,paste("bom_YearlyTSDF",Feature,sep="_") %>% 
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(2009,1),frequency=1)
+          )
+    
+    # Monthly ----
+    assign(paste("bom_MonthlyTS",Feature,sep="_")
+          ,paste("bom_MonthlyTSDF",Feature,sep="_") %>%
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(2009,1),frequency=12)
+          )
+    
+    # Weekly ----
+    assign(paste("bom_WeeklyTS",Feature,sep="_")
+          ,paste("bom_WeeklyTSDF",Feature,sep="_") %>% 
+              get() %>% 
+              as.matrix() %>% 
+              ts(start=c(2009,1),frequency=52)
+          )
+    
+}
+
+```
+
+```{r BOM: Validate, echo=FALSE, eval=FALSE, results="hide", rows.print=50, cols.print=30, fig.width=10, fig.height=5}
+# Check dfs ----
+# Yearly
+bom_Yearly %>% 
+    mutate(year_id=as.numeric(year_id)) %>% 
+    filter(!state %in% c("TAS")) %>% 
+    group_by(state) %>% 
+    summarise(min=min(year_id)
+             ,max=max(year_id)
+             ,num=n()
+             ,len=length(unique(year_id))
+             )
+
+# Monthly
+bom_Monthly %>% 
+    mutate(month_id=as.numeric(month_id)) %>% 
+    filter(!state %in% c("TAS")) %>% 
+    group_by(state) %>% 
+    summarise(min=min(month_id)
+             ,max=max(month_id)
+             ,num=n()
+             ,len=length(unique(month_id))
+             )
+
+# Weekly
+bom_Weekly %>% 
+    mutate(week_id=as.numeric(week_id)) %>% 
+    filter(!state %in% c("TAS")) %>% 
+    group_by(state) %>% 
+    summarise(min=min(week_id)
+             ,max=max(week_id)
+             ,num=n()
+             ,len=length(unique(week_id))
+             )
+
+bom_WeeklyTS_avg_temp %>% autoplot()
+bom_WeeklyTS_rng_temp %>% autoplot()
+```
+
+```{r BOM: Visualise, echo=FALSE, eval=FALSE, warning=FALSE, message=FALSE, fig.width=15, fig.height=10}
+# Plot BOM Data ----
+bom_WeeklyTS_avg_temp %>% 
+    autoplot(size=1) +
+    autolayer(bom_WeeklyTS_rng_temp) +
+    facet_wrap(~series, ncol=1) +
+    geom_smooth(method="lm", size=2) +
+    geom_text(
+        data = data.frame(
+            label = c(replicate(4,"Mean Temp"),replicate(4,"Linear Model"),replicate(4,"Range Temp"))
+            ,series = replicate(3,bom_WeeklyTSDF %>% names) %>% as.vector()
+            ,x = replicate(12,2020)
+            ,y = c(7,13,8,4,19,25,19,15,45,45,40,35)
+        ),
+        mapping = aes(x=x, y=y, label=label),
+        nudge_x = 0.2
+    ) +
+    scale_x_continuous(breaks=seq(2009,2023)) +
+    scale_y_continuous(limits=c(0,55)
+                      ,breaks=seq(0,50,by=10)
+                      ) +
+    theme(legend.position="none"
+         ,panel.grid.minor.x=element_blank()
+         ,panel.grid.minor.y=element_blank()
+         ) +
+    labs(title="Temperature Fluctuations Over Time"
+        ,subtitle="By State, By Week"
+        ,y="Temperature"
+        ,caption="Source: Bureau of Meterology"
+        )
+
+```
+
+```{r BOM: Test TS Stationarity, echo=FALSE, eval=FALSE, rows.print=50, cols.print=30, fig.width=10, fig.height=7}
+# Test for stationarity ----
+bom_WeeklyTS_avg_temp %>% 
+    (function(x){
+        return <- colnames(x) %>% data.frame("state"=.,"value"=NA)
+        for (state in return[,"state"]) {
+            return[return[,"state"]==state,"value"] <- (x[,state] %>% ur.kpss(use.lag=108))@teststat
+        }
+        return(return)
+    }) %>% 
+    mutate(test="KPSS Unit Root Test"
+          ,threshold=0.02
+          ,feature="Mean Weekly Temp"
+          ,outcome=ifelse(value<threshold,"Is Stationary","Not Stationary")
+          ) %>% 
+    select(feature,state,test,everything()) %>% 
+    rename_all(funs(str_to_title(.))) %>% 
+    kable(align="l")%>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 )
+```
+
+```{r BOM: Test TS White Noise, echo=FALSE, eval=FALSE, rows.print=50, cols.print=30, fig.width=10, fig.height=7}
+# Test to ensure is not white-noise ----
+bom_WeeklyTS_avg_temp %>% 
+    (function(x){
+        return <- colnames(x) %>% data.frame("state"=.,"value"=NA)
+        for (state in return[,"state"]) {
+            return[return[,"state"]==state,"value"] <- x[,state] %>% Box.test(lag=108, type="Lj") %>% extract("p.value")
+        }
+        return(return)
+    }) %>% 
+    mutate(threshold=0.02
+          ,outcome=ifelse(value<threshold,"Not Whitenoise","Is Whitenoise")
+          ,value=ifelse(value<0.0000000000000002,"<0.0000000000000002",as.character(value))
+          ,test="Box-Ljung Test"
+          ,feature="Mean Weekly Temp"
+          ) %>% 
+    select(feature,state,test,everything()) %>% 
+    rename_all(funs(str_to_title(.))) %>% 
+    kable(align="l") %>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 )
+```
+
+```{r BOM: Test Auto-Correlation, echo=FALSE, eval=FALSE, rows.print=50, cols.print=30, fig.width=15, fig.height=10}
+# Set ACF ----
+bom_WeeklyACF_avg_temp <- bom_WeeklyTSDF_avg_temp %>% 
+    gather("state","temp") %>% 
+    group_by(state) %>% 
+    summarise(list_acf=list(acf(temp, lag.max=108, plot=FALSE))) %>%
+    mutate(acf_vals=purrr::map(list_acf, ~as.numeric(.x$acf))) %>% 
+    select(-list_acf) %>% 
+    unnest() %>%
+    group_by(state) %>% 
+    mutate(lag=row_number() - 1) %>% 
+    ungroup() %>% 
+    mutate(state=paste(state,"(Auto-Correlation)")) %>% 
+    ggplot(aes(x=lag, y=acf_vals, color=state)) +
+    geom_bar(stat="identity", width=.05) +
+    geom_hline(yintercept = 0) +
+    geom_hline(data = . %>% group_by(state) %>% summarise(ci = qnorm((1+0.95)/2)/sqrt(n()))
+               ,aes(yintercept = -ci)
+               ,color="blue"
+               ,linetype="dotted"
+               ) +
+    geom_hline(data = . %>% group_by(state) %>% summarise(ci = qnorm((1+0.95)/2)/sqrt(n()))
+               ,aes(yintercept = ci)
+               ,color="blue"
+               ,linetype="dotted"
+               ) +
+    scale_x_continuous(breaks=seq(0,110,by=20)) +
+    theme(legend.position="none"
+          ,panel.grid.minor.x=element_blank()
+          ,panel.grid.minor.y=element_blank()
+          ) +
+    labs(x="Lag (108 periods)"
+         ,y="Level of Correlation (limits: -1 & 1)"
+         ) +
+    facet_wrap(~state, ncol=1)
+
+# Set PACF ----
+bom_WeeklyPACF_avg_temp <- bom_WeeklyTSDF_avg_temp %>% 
+        gather("state","temp") %>% 
+        group_by(state) %>% 
+        summarise(list_acf=list(pacf(temp, lag.max=108, plot=FALSE))) %>%
+        mutate(acf_vals=purrr::map(list_acf, ~as.numeric(.x$acf))) %>% 
+        select(-list_acf) %>% 
+        unnest() %>%
+        group_by(state) %>% 
+        mutate(lag=row_number() - 1) %>% 
+        ungroup() %>% 
+        mutate(state=paste(state,"(Partial Auto-Correlation)")) %>% 
+        ggplot(aes(x=lag, y=acf_vals, color=state)) +
+        geom_bar(stat="identity", width=.05) +
+        geom_hline(yintercept = 0) +
+        geom_hline(data = . %>% group_by(state) %>% summarise(ci = qnorm((1+0.95)/2)/sqrt(n()))
+                   ,aes(yintercept = -ci)
+                   ,color="blue"
+                   ,linetype="dotted"
+                   ) +
+        geom_hline(data = . %>% group_by(state) %>% summarise(ci = qnorm((1+0.95)/2)/sqrt(n()))
+                   ,aes(yintercept = ci)
+                   ,color="blue"
+                   ,linetype="dotted"
+                   ) +
+        scale_x_continuous(breaks=seq(0,110,by=20)) +
+        theme(legend.position="none"
+              ,panel.grid.minor.x=element_blank()
+              ,panel.grid.minor.y=element_blank()
+              ) +
+        labs(x="Lag (108 periods)"
+             ,y="Level of Correlation (limits: -1 & 1)"
+             ) +
+        facet_wrap(~state, ncol=1)
+
+# Display ----
+grid.arrange(bom_WeeklyACF_avg_temp
+    ,bom_WeeklyPACF_avg_temp
+    ,ncol=2
+    ,top=textGrob(expression(bold(underline("Auto-Correlation Function for Mean Temperature")))
+                  ,hjust=0.5
+                  ,gp=gpar(fontsize=20)
+                  )
+)
+```
+
+```{r BOM: Forecast, echo=FALSE, eval=FALSE, warning=FALSE, message=FALSE, rows.print=50, cols.print=30, fig.width=15, fig.height=8}
+tim_sta <- proc.time()
+bom_acc <- NULL
+for (state in c("NSW","VIC","QLD","SA")) {
+    bom_WeeklyTS_avg_temp[,state] %>% 
+        (function(x) {
+            tim_sta <- proc.time()
+            
+            # Set up
+            col <- case_when(state=="NSW" ~ "red"
+                            ,state=="QLD" ~ "green"
+                            ,state=="SA" ~ "blue"
+                            ,state=="VIC" ~ "orange"
+                            )
+            testyears <- 1
+            yearsback <- 5
+            if (findfrequency(x)==12) {
+                forecastperiod <- case_when(testyears==1 ~ (12*2+5)
+                                           ,testyears==2 ~ (12*3+5)
+                                           ,testyears==3 ~ (12*4+5)
+                                           )
+            } else {
+                forecastperiod <- case_when(testyears==1 ~ (52*2 + 10)
+                                            ,testyears==2 ~ (52*3 + 10)
+                                            ,testyears==3 ~ (52*4 + 10)
+                                            )
+            }
+            
+            # Segment
+            if (yearsback>0) {
+                x %<>% window(start=c(x %>% end() %>% first()-(yearsback+testyears)
+                                     ,x %>% end() %>% last()
+                                     ))
+            } 
+            bom_trn <- x %>% 
+                window(end=c(x %>% end() %>% first()-testyears
+                            ,x %>% end() %>% last()
+                            ))
+            bom_tst <- x %>% 
+                window(start=c(x %>% end() %>% first()-testyears
+                              ,x %>% end() %>% last()
+                              ))
+            
+            # Fit
+            bom_fit <- bom_trn %>% auto.arima(max.p=20, max.q=20, ic="aicc")
+            
+            # Test
+            bom_fcs <- bom_fit %>% forecast(h=length(bom_tst))
+            bom_acc <<- accuracy(bom_fcs, bom_tst) %>% 
+                data.frame() %>% 
+                select("RMSE","MAE","MAPE","MASE") %>% 
+                rownames_to_column("SetType") %>% 
+                filter(SetType=="Test set") %>% 
+                select(-SetType) %>% 
+                mutate(State=state) %>% 
+                select(State,everything()) %>% 
+                rbind(bom_acc,.)
+            
+            # # Print
+            # print(x %>% 
+            #           autoplot(color=paste0("dark",col)) +
+            #           autolayer(bom_fit %>% forecast(h=forecastperiod), PI=TRUE, series="ARIMA", color=col, size=1) + 
+            #           autolayer(bom_tst, color="black", size=1) + 
+            #           scale_x_continuous(breaks=seq(2009,2021)
+            #                             ) +
+            #           theme(panel.grid.minor.x=element_blank()
+            #                ,plot.title=element_text(vjust=-10, color=paste0("dark",col))
+            #                ) +
+            #           labs(title=paste0("Forecast for ",state)
+            #               ,y="Temp"
+            #               ,x="Time"
+            #               )
+            #       )
+            
+            # Return
+            assign(paste0("bom_FcsPlt_",state)
+                  ,x %>%
+                      autoplot(color=paste0("dark",col)) +
+                      autolayer(bom_fit %>% forecast(h=forecastperiod), PI=TRUE, series="Forecast", color=col, size=1) +
+                      autolayer(bom_tst, color="black", size=1) + 
+                      scale_x_continuous(breaks=seq(2009,2021)) +
+                      theme(axis.title.x=element_blank()
+                           ,axis.title.y=element_blank()
+                           ,plot.title=element_text(vjust=-6, color=paste0("dark",col))
+                           ,panel.grid.minor.x=element_blank()
+                           ,plot.margin=unit(c(0.1,3,0.1,3),"mm")
+                           ) +
+                      labs(title=state
+                          ,caption=bom_acc %>% filter(State==state) %>% select("RMSE") %>% pull() %>% round(2) %>% paste0("Scored RMSE=",.)
+                          )
+                  ,envir=globalenv()
+                  )
+            # (proc.time()-tim_sta)[3] %>% as.numeric() %>% seconds_to_period() %>% print()
+        })
+}
+
+grid.arrange(bom_FcsPlt_NSW
+             ,bom_FcsPlt_QLD
+             ,bom_FcsPlt_SA
+             ,bom_FcsPlt_VIC
+             ,ncol=1
+             ,left=textGrob("Avg Weekly Temp", rot=90, vjust=1)
+             ,bottom=textGrob("Time", hjust=0.5)
+             ,top=textGrob(expression(bold(underline("Forecast by State")))
+                          ,hjust=0.5
+                          ,gp=gpar(fontsize=20)
+                          )
+             ,padding=unit(0.1,"line")
+             )
+
+# (proc.time()-tim_sta)[3] %>% as.numeric() %>% seconds_to_period() %>% print()
+
+```
+
+```{r BOM: Score, echo=FALSE, eval=FALSE, warning=FALSE, message=FALSE, rows.print=50, cols.print=30, fig.width=15, fig.height=8}
+bom_acc %>% 
+    kable(align="l") %>% 
+    kable_styling(bootstrap_options=c("striped","bordered","condensed")
+                 ,full_width=FALSE
+                 ,position="left"
+                 )
+```
+
+<!-- END hidden section -->
+
+
+# Findings {#findings}
+
+Based off the analysis conducted, and the forecast predicted, there are four key findings.
+
+* **History of Energy Prices**: Firstly, the Energy Prices for all four states were comparatively stable up until circa $2013$, after which the prices have begun to escalate at an increasingly steep rate. Combine this with the sporadicity of the seasonal prices for the states indicates that a time-series forecast for the future of energy prices may not be perfectly accurate.
+
+* **Suitable for Forecasting**: Secondly, while the data may not be perfectly accurate for time-series prediction, it is still suitable for forecasting. That is because it is:
+
+    1. Not Whitenoise;
+    1. Not Stationary;
+    1. Not Seasonal (or Marginally Seasonal, as with the $SA$ data);
+    1. Is Regular;
+    1. Is Moderately Stable (all scores close to the Stability Threshold);
+    1. Not Lumpy; and
+    1. Is Auto-Correlated.
+    
+* **Relatively Predictable**: Thirdly, having fed the data in to an ARIMA forecasting model, the predictions are relatively accurate, with predictions falling between $40\%$ inaccuracy (as with NSW), and $90\%$ inaccuracy rate (as with $VIC$).
+
+* **Forward Projections**: Fourthly, using the forecast model to project forward, and combined with the historic trends, it can be concluded that the energy prices will not be significantly different than the prices seen in the year $2019$. The exact energy price could vary dramatically in this forecast due to the broad scope of the actual forecast model.
+
+
+# Limitations {#limitations}
+
+Resulting from this research, a number of limitations have been identified. As listed:
+
+1. The Future prices are simply based on a single input variable: Past prices.
+1. The Time-Series model does not take in to account external variables which may affect energy prices, such as energy production or energy capacity or percentage of renewable energy in the Grid.
+1. The Analysis does not take in to account Government Policies which may have influenced the prices.
+
+
+# Opportunities for Future Research {#opportunities}
+
+In order to further increase the accuracy of the prediction model, and to address some of the identified limitations, there are some other opportunities for future research. Including:
+
+1. Investigate the amount in which the Federal Legislative Landscape has changed since circa 2015, and the extent to which that has influenced energy prices.
+1. Correlate the energy price fluctuations with the closures of energy production plants.
+1. Use the results of this prediction as an ensemble feature in a multivariate regression model to predict Future Energy Prices. Other features could potentially include:
+  
+    1. Percentage breakdown of Renewable vs. Non-Renewable Energy sources per state per month.
+    1. Amount of Energy Produced (or Energy Capacity) per state per month.
+    1. Average temperature (or temperature range) per state per month.
+
+It is recommended that these opportunities be explored in full, so as to provide a detailed prediction model for future energy prices.
+
+
+# Conclusion {#conclusion}
+
+In conclusion, analysis of the AEMO historic energy prices provides a suitable method of forecasting future prices. Exploration of the data revealed that the prices have indeed been increasing over the last 20 years, and have begun an exponential increase since approximately $2013$. Moreover, having applied various statistical tests to the data, the data is suitable for time-series forecasting, due to it being not stationary, not whitenoise, marginally seasonal, and moderately stable.
+
+With the intention of wanting to explore whether the future energy prices are able to be predicted solely using univariate time series data, the answer is yes. The historic AEMO data is regular and univariate, and is able to be fed in to an ARIMA forecasting model to predict the future prices to a certain level of confidence. This confidence interval is tighter for $NSW$ and $QLD$, and very broad for $VIC$ and $SA$. However, the accuracy level of this model can be greatly improved when modeled in conjunction with various other external influences, as outlined in Future Opportunities. Therefore, this research is able to provide assistance to Australian households and businesses, and is able to advise Government policy to curb this trend.
+
+  
+# References {#references}
+
+[](){#ref:aemo_nd}
+Australian Energy Market Operator (AEMO) nd., viewed 1/Oct/2019, <<https://www.aemo.com.au/>>.
+
+[](){#ref:horan_etal_2017}
+Horan, S, McGrath, T, & Santha, N 2017, 'Australian energy policy and economic rationalism', *Energy News*, vol. 35, no. 3, pp. 16-7, ISSN: 1445-2227.
+
+[](){#ref:hutchens_2018}
+Hutchens, G 2018, 'Australia's high electricity prices the 'new normal', report says', *The Guardian*, viewed 10/Oct/2019, <<https://www.theguardian.com/australia-news/2018/jul/01/australias-high-electricity-prices-the-new-normal-report-says>>.
+
+[](){#ref:hyndman_nda}
+Hyndman, R nd.(a), 'stl_features',  *R Documentation*, viewed 28/Oct/2019, <<https://www.rdocumentation.org/packages/tsfeatures/versions/1.0.1/topics/stl_features>>.
+
+[](){#ref:hyndman_ndb}
+Hyndman, R nd.(b), 'Acf',  *R Documentation*, viewed 1/Nov/2019, <<https://www.rdocumentation.org/packages/forecast/versions/8.9/topics/Acf>>.
+
+[](){#ref:kang_2017}
+Kang, E 2017, 'Time Series: ARIMA Model',  *Medium*, viewed 30/Oct/2019, <<https://medium.com/@kangeugine/time-series-arima-model-11140bc08c6>>.
+
+[](){#ref:kwiatkowski_etal_1992}
+Kwiatkowski, D., Phillips, P., Schmidt, P., & Shin, Y. 1992, 'Testing the Null Hypothesis of Stationarity Against the Alternative of a Unit Root: How Sure Are We That Economic Time Series Have a Unit Root?', *Journal of Econometrics*, vol. 54, no. 1, pp. 159-178, DOI: 10.1016/0304-4076(92)90104-Y.
+
+[](){#ref:latimer_2018}
+Latimer, C 2018, ''No likelihood of relief ahead': Future power prices continue to rise', *The Sydney Morning Herals*, viewed 10/Oct/2018, <<https://www.smh.com.au/business/the-economy/no-likelihood-of-relief-ahead-future-power-prices-continue-to-rise-20181030-p50cu1.html>>.
+
+[](){#ref:lincoln_2012}
+Lincoln, S 2012, 'Options for Change in the Australian Energy Profile', *AMBIO*, vol. 41, no. 8, pp. 841-50, DOI: 10.1007/s13280-012-0315-0.
+
+[](){#ref:ljung_box_1978}
+Ljung, G & Box, G 1978, 'On a measure of lack of fit in time series models',  *Biometrika*, vol. 65, no. 2, pp.297-303, DOI: 10.2307/2335207.
+
+[](){#ref:mcmurry_politis_2010}
+McMurry, T., & Politis, N. 2010, 'Banded and tapered estimates for autocovariance matrices and the linear process bootstrap', *Journal of Time Series Analysis*, vol. 31, no. 6, pp. 471-482, DOI: 10.1111/j.1467-9892.2010.00679.x.
+
+[](){#ref:ollech_2019}
+Ollech, D 2019, 'seastests - Seasonality tests',  *R Vignette*, viewed 28/Oct/2019, <<https://cran.r-project.org/web/packages/seastests/vignettes/seastests-vignette.html>>.
+
+[](){#ref:percival_2018}
+Percival, L 2018, 'Higher energy prices are here to stay – here’s what we can do about it', *The Conversation*, viewed 10/Oct/2019, <<http://theconversation.com/higher-energy-prices-are-here-to-stay-heres-what-we-can-do-about-it-99187>>.
+
+[](){#ref:pfaff_nd}
+Pfaff, B nd., 'ur.kpss',  *R Documentation*, viewed 28/Oct/2019, <<https://www.rdocumentation.org/packages/urca/versions/1.3-0/topics/ur.kpss>>.
+
+[](){#ref:rcore_nd}
+R-Core, nd., 'Box.test',  *R Documentation*, viewed 28/Oct/2019, <<https://www.rdocumentation.org/packages/stats/versions/3.6.1/topics/Box.test>>.
+
+[](){#ref:sax_nd}
+Sax, C nd., 'qs',  *R Documentation*, viewed 28/Oct/2019, <<https://www.rdocumentation.org/packages/seasonal/versions/1.2.1/topics/qs>>.
+
+[](){#ref:srivastava_2015}
+Srivastava, T 2015, 'A Complete Tutorial on Time Series Modelling in R',  *Analytics Vidya*, viewed 29/Oct/2019, <<https://www.analyticsvidhya.com/blog/2015/12/complete-tutorial-time-series-modeling/>>.
+
+[](){#ref:sardar_2015}
+Sardar, P 2015, 'Research and development, welfare and efficiency: an Australian energy perspective', *International Journal of Flobal Energy Issues*, vol. 11, no. 1, pp. 155-60, ISSN: 0954-7118.
+
+[](){#ref:yang_hyndman_2019}
+Yang, Y, & Hyndman, RJ 2019, 'Introduction to the tsfeatures package',  *R Vignette*, viewed 28/Oct/2019, <<https://cran.r-project.org/web/packages/tsfeatures/vignettes/tsfeatures.html>>. 
+
+[](){#ref:zeileis_grothendieck_nd}
+Zeileis, A, & Grothendieck, G nd., 'zoo: An S3 Class and Methods for Indexed Totally Ordered Observations',  *R Vignette*, viewed 28/Oct/2019, <<https://cran.r-project.org/web/packages/zoo/vignettes/zoo.pdf>>.
+
+[](){#ref:zeileis_nd}
+Zeileis, A, nd. 'is.regular',  *R Documentation*, viewed 28/Oct/2019, <<https://www.rdocumentation.org/packages/zoo/versions/1.8-6/topics/is.regular>>.
+
+
+# Post Script {#postscript}
+
+This report was compiled with some assistance from others. Acknowledgements go to:
+
+1. Yan Holtz for his code for how to add the footer elements (<https://holtzy.github.io/Pimp-my-rmd/> & <https://github.com/holtzy/epuRate>).
+1. Tim Holman for his code for how to add the GitHub corner (<https://github.com/tholman/github-corners>).
+1. William Dai for his assistance to write the scripts to web-scrape the AEMO website.
+1. Michael Gordon for his assistance to write the scripts to web-scrape the BOM website.
+
+
+This report is also published on the following sites:
+
+1. Medium: [Medium](www.medium.com)
+1. RPubs: [RPubs](www.rpubs.com)
+1. GitHub: [GitHub](www.github.com)
+1. LinkedIn: [LinkedIn](www.linkedin.com)
